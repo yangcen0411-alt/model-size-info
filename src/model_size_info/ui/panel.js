@@ -28,6 +28,7 @@
   function setText(id, value) { $(id).textContent = value; }
   function setHidden(id, value) { $(id).hidden = value; }
   function count(value) { return value === null || value === undefined ? '—' : numbers.format(value); }
+  var tree = window.ModelSizeTree.create({ send: send, sizeText: sizeText });
 
   function renderRows(rows) {
     var list = $('definition-list');
@@ -47,6 +48,9 @@
   function render(data) {
     current = data;
     var model = data.kind === 'model';
+    var isTree = data.kind === 'tree';
+    setHidden('primary', isTree); setHidden('properties', isTree); setHidden('tree-view', !isTree);
+    setHidden('auto-option', isTree);
     var parts = formatBytes(data.bytes);
     setText('kind', data.subtitle);
     setText('object-name', data.title); $('object-name').title = data.title;
@@ -71,13 +75,30 @@
     setText('direct-entities', count(data.direct_entities));
     setText('instance-count', count(data.instance_count));
     setHidden('selected-row', model); setHidden('entities-row', data.direct_entities === null); setHidden('instances-row', data.instance_count === null);
-    setHidden('breakdown', model || (data.rows.length < 2 && data.selected_count < 2));
+    setHidden('breakdown', isTree || model || (data.rows.length < 2 && data.selected_count < 2));
     renderRows(data.rows);
     setText('note', data.note);
     setText('error', data.error || ''); setHidden('error', !data.error);
     setHidden('progress', !data.busy); setHidden('cancel', !data.busy);
     setText('measure', model ? '测量当前模型' : (data.bytes === null ? '测量选中定义' : '重新测量'));
     $('measure').disabled = data.busy || (!model && !data.rows.length);
+    if (isTree) {
+      tree.render(data);
+      setText('tree-model-name', data.title); $('tree-model-name').title = data.title;
+      setText('tree-root-count', count(data.tree_root_count));
+      setText('tree-definition-count', count(data.definition_count));
+      setText('tree-measured-count', count(data.tree_measured));
+      var scanning = !data.tree_complete;
+      var treeDetail = scanning ? (data.busy ? '正在扫描，已检查 ' + count(data.tree_scanned) + ' 个图元…' : '扫描已暂停，可继续读取层级并测量。') :
+        (data.busy ? '正在测量 ' + count(data.tree_measured) + ' / ' + count(data.definition_count) + ' 个定义…' :
+          (data.pending_count ? '还有 ' + count(data.pending_count) + ' 个定义待测量。相同定义只导出一次。' : '父级大小包含子级；各层大小不相加。'));
+      setText('tree-detail', treeDetail);
+      setText('tree-status', data.error ? (data.tree_errors ? '部分失败' : '查看提示') : (data.busy ? (scanning ? '正在扫描' : '正在测量') : (data.pending_count ? '待测量' : (scanning ? '已暂停' : '已就绪'))));
+      $('tree-status').className = 'status ' + (data.error ? 'error' : (data.busy ? 'busy' : (!data.pending_count && !scanning ? 'ready' : '')));
+      setHidden('tree-progress', !data.busy);
+      setText('measure', scanning ? '继续扫描并测量' : (data.pending_count ? (data.tree_measured ? '继续测量' : '测量组件树') : '重新测量组件树'));
+      $('measure').disabled = data.busy || (data.tree_complete && data.definition_count === 0);
+    }
     $('refresh').disabled = data.busy;
     $('auto').checked = data.auto;
     setText('file-name', data.file.name); $('file-name').title = data.file.name;
@@ -87,6 +108,8 @@
     $('scope-model').classList.toggle('active', data.scope === 'model');
     $('scope-follow').setAttribute('aria-pressed', String(data.scope === 'follow'));
     $('scope-model').setAttribute('aria-pressed', String(data.scope === 'model'));
+    $('scope-tree').classList.toggle('active', data.scope === 'tree');
+    $('scope-tree').setAttribute('aria-pressed', String(data.scope === 'tree'));
     setText('version', 'v' + data.version);
     var status = data.error ? '测量失败' : (data.busy ? '正在测量' : (data.bytes !== null ? '已更新' : '等待测量'));
     setText('status', status);
@@ -95,6 +118,7 @@
 
   $('scope-follow').addEventListener('click', function () { send('scope', 'follow'); });
   $('scope-model').addEventListener('click', function () { send('scope', 'model'); });
+  $('scope-tree').addEventListener('click', function () { send('scope', 'tree'); });
   $('auto').addEventListener('change', function () { send('auto', this.checked); });
   $('measure').addEventListener('click', function () { send('measure'); });
   $('cancel').addEventListener('click', function () { send('cancel'); });

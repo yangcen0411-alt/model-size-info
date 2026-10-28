@@ -105,7 +105,10 @@ module ModelFootprintTools
         @generation = 0
         @busy = false
         @measuring = false
+        @navigating = false
         @error = nil
+        @tree_serial = 0
+        reset_tree
         @selection_listener = SelectionListener.new(self)
         @model_listener = ModelListener.new(self)
         @materials_listener = MaterialsListener.new(self)
@@ -122,8 +125,8 @@ module ModelFootprintTools
           preferences_key: 'ModelFootprintTools.SizeInfo.Panel',
           scrollable: true,
           resizable: true,
-          width: 380,
-          height: 700,
+          width: 440,
+          height: 740,
           min_width: 320,
           min_height: 440,
           style: UI::HtmlDialog::STYLE_UTILITY
@@ -139,6 +142,7 @@ module ModelFootprintTools
 
       def close
         cancel
+        reset_tree
         detach_model
         Sketchup.remove_observer(@app_listener)
         @dialog = nil
@@ -151,6 +155,7 @@ module ModelFootprintTools
         detach_model
         @model = model
         @analyzer = Analyzer.new(model)
+        reset_tree
         @model.selection.add_observer(@selection_listener)
         @model.add_observer(@model_listener)
         @model.materials.add_observer(@materials_listener)
@@ -159,21 +164,34 @@ module ModelFootprintTools
 
       def selection_changed
         return unless @dialog
+        return if @navigating || @scope == 'tree'
         @error = nil
         schedule
       end
 
       def model_changed
-        return if @measuring || !@dialog
+        return if @measuring || @navigating || !@dialog
         @analyzer.invalidate if @analyzer
+        reset_tree
         @error = nil
         schedule
       end
 
       def refresh(force = false)
         return unless active?
-        @analyzer.invalidate if force
+        if force
+          @analyzer.invalidate
+          reset_tree
+        end
         @error = nil
+        if @scope == 'tree'
+          if @tree_index.nil?
+            scan_tree(false)
+          else
+            render
+          end
+          return
+        end
         render
         auto_measure
       rescue StandardError => error
@@ -182,6 +200,7 @@ module ModelFootprintTools
 
       def measure(force = false)
         return unless active?
+        return measure_tree(force) if @scope == 'tree'
         cancel
         @error = nil
         data = @analyzer.snapshot(@scope)
@@ -229,7 +248,8 @@ module ModelFootprintTools
           refresh
         end
         @dialog.add_action_callback('scope') do |_context, scope|
-          next unless %w[follow model].include?(scope)
+          next unless %w[follow model tree].include?(scope)
+          next if @scope == scope
           @scope = scope
           schedule
         end
@@ -243,6 +263,9 @@ module ModelFootprintTools
         @dialog.add_action_callback('cancel') do |_context|
           cancel
           render
+        end
+        @dialog.add_action_callback('locate') do |_context, request|
+          locate_tree_item(request)
         end
       end
 
@@ -265,6 +288,7 @@ module ModelFootprintTools
         UI.stop_timer(@job_timer) if @job_timer
         @refresh_timer = @job_timer = nil
         @busy = false
+        @job_kind = nil
       end
 
       def schedule
@@ -279,7 +303,7 @@ module ModelFootprintTools
       end
 
       def auto_measure
-        return unless @auto && !@busy && @scope != 'model'
+        return unless @auto && !@busy && @scope == 'follow'
         data = @analyzer.snapshot(@scope)
         return unless data[:kind] == 'selection' && data[:pending_count] > 0
         return if data[:definition_count] > AUTO_LIMIT
@@ -297,13 +321,19 @@ module ModelFootprintTools
               @analyzer.measure_definition(definition, force)
             end
           rescue StandardError => error
-            @error = error.message
-            queue.clear
+            if @scope == 'tree' && definition
+              @tree_errors[definition.persistent_id.to_s] = error.message
+              @error = "#{@tree_errors.length} 个定义测量失败；成功结果已保留，可点击下方按钮重试未完成项。"
+            else
+              @error = error.message
+              queue.clear
+            end
           ensure
             @measuring = false
           end
           if queue.empty?
             @busy = false
+            @job_kind = nil
             render
           else
             render
@@ -314,10 +344,11 @@ module ModelFootprintTools
 
       def render
         return unless active?
-        data = @analyzer.snapshot(@scope)
+        data = @scope == 'tree' ? tree_snapshot : @analyzer.snapshot(@scope)
         data[:auto] = @auto
         data[:scope] = @scope
         data[:busy] = @busy
+        data[:job_kind] = @job_kind
         data[:error] = @error
         data[:auto_limit] = AUTO_LIMIT
         data[:version] = VERSION
@@ -325,12 +356,125 @@ module ModelFootprintTools
         # the embedded Chromium versions used by older SketchUp releases.
         payload = JSON.generate(data).gsub("\u2028", '\\u2028').gsub("\u2029", '\\u2029')
         @dialog.execute_script("window.ModelSizeInfo.render(#{payload});")
+        @tree_structure_sent = true if data[:tree_structure]
       rescue StandardError => error
         warn("[模型占用信息] #{error.class}: #{error.message}")
       end
 
       def show_error(error)
         @error = error.message
+        render
+      end
+
+      def reset_tree
+        @tree_index = nil
+        @tree_errors = {}
+        @tree_structure_sent = false
+        @tree_serial += 1
+      end
+
+      def tree_snapshot
+        index = @tree_index
+        definitions = index ? index.definitions : []
+        sizes = {}
+        definitions.each do |definition|
+          cached = @analyzer.cached(definition)
+          id = definition.persistent_id.to_s
+          sizes[id] = { bytes: cached && cached[:bytes], error: @tree_errors[id] }
+        end
+        measured = sizes.values.count { |entry| !entry[:bytes].nil? }
+        data = @analyzer.snapshot('model')
+        data.merge!(
+          kind: 'tree', bytes: nil, subtitle: '模型组件树',
+          tree_token: @tree_serial.to_s,
+          tree_complete: index ? index.complete? : false,
+          tree_root_count: index ? index.root_count : 0,
+          tree_scanned: index ? index.scanned_entities : 0,
+          tree_measured: measured,
+          tree_errors: @tree_errors.length,
+          tree_sizes: sizes,
+          definition_count: definitions.length,
+          pending_count: definitions.length - measured,
+          tree_structure: index && index.complete? && !@tree_structure_sent ? index.payload : nil,
+          note: '每项为其定义单独保存的 SKP 大小；父级已包含子级，不能逐行相加。相同定义共享测量结果。隐藏、锁定项也会列出。'
+        )
+        data
+      end
+
+      def scan_tree(measure_after)
+        cancel
+        @error = nil
+        @tree_index ||= ComponentTree.new(@model)
+        if @tree_index.complete?
+          return measure_tree if measure_after
+          return render
+        end
+        @busy = true
+        @job_kind = 'scan'
+        render
+        scan_tree_next(measure_after, @generation)
+      end
+
+      def scan_tree_next(measure_after, token)
+        @job_timer = UI.start_timer(0.02, false) do
+          @job_timer = nil
+          next unless token == @generation && active? && @scope == 'tree'
+          begin
+            complete = @tree_index.step
+            if complete
+              @busy = false
+              @job_kind = nil
+              render
+              measure_tree if measure_after
+            else
+              render
+              scan_tree_next(measure_after, token)
+            end
+          rescue StandardError => error
+            @busy = false
+            @job_kind = nil
+            reset_tree
+            show_error(error)
+          end
+        end
+      end
+
+      def measure_tree(force = false)
+        return scan_tree(true) unless @tree_index && @tree_index.complete?
+        cancel
+        @error = nil
+        queue = @tree_index.definitions.select(&:valid?)
+        # Resume partial scans without repeating every already-exported file.
+        force = force && queue.all? { |definition| @analyzer.cached(definition) }
+        @analyzer.invalidate if force
+        queue.reject! { |definition| @analyzer.cached(definition) }
+        @tree_errors = {}
+        return render if queue.empty?
+        @busy = true
+        @job_kind = 'tree'
+        render
+        measure_next(queue, @generation, false)
+      end
+
+      def locate_tree_item(request)
+        return unless active?
+        unless request.is_a?(Hash) && request['token'] == @tree_serial.to_s && @tree_index
+          raise '组件树已更新，请在最新列表中重新选择对象。'
+        end
+        path = @tree_index.resolve(request['path'])
+        @navigating = true
+        parent_path = path[0...-1]
+        unless @model.active_path.to_a == parent_path
+          @model.active_path = parent_path.empty? ? nil : parent_path
+        end
+        @model.selection.clear
+        @model.selection.add(path.last)
+        @model.active_view.zoom(@model.selection)
+        @error = nil
+      rescue StandardError => error
+        @error = "无法定位：#{error.message}"
+      ensure
+        @navigating = false
         render
       end
     end

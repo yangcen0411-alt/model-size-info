@@ -2,9 +2,9 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; min-width: 288px; background: #f4f6f7; color: var(--ink); font: 12px/1.6 "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 button { cursor: pointer; }
-button:focus-visible, input:focus-visible { outline: 2px solid #55a79c; outline-offset: 3px; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #55a79c; outline-offset: 2px; }
 button:disabled { cursor: default; opacity: .5; }
 .header { display: flex; align-items: center; gap: 10px; padding: 18px 18px 15px; background: #fff; border-bottom: 1px solid var(--line); }
 .brand-mark { display: grid; place-items: center; flex-shrink: 0; width: 34px; height: 36px; color: var(--accent); background: #edf7f4; border-radius: 9px; }
@@ -53,6 +53,38 @@ h3 { font-size: 11px; font-weight: 600; }
 .definition-meta { color: #9aa4ac; font-size: 9px; }
 .definition-size { white-space: nowrap; color: #4d5b65; font-size: 11px; font-variant-numeric: tabular-nums; }
 .definition-size.pending { color: #a2aab1; }
+.tree-heading { padding: 14px 14px 12px; }
+.tree-metrics { display: flex; margin: 14px 0 12px; gap: 22px; }
+.tree-metrics div { display: flex; flex-direction: column; }
+.tree-metrics strong { font: 600 21px/1.3 "Segoe UI", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+.tree-metrics span { margin-top: 2px; color: #8a969f; font-size: 10px; }
+.tree-toolbar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--line); background: #fafbfc; }
+.tree-toolbar label { color: #8a969f; font-size: 10px; flex-shrink: 0; }
+.tree-toolbar select { min-width: 0; max-width: 133px; padding: 3px 2px; color: #586873; background: #fff; border: 1px solid #dfe6e8; border-radius: 4px; font-size: 10px; }
+.text-button { padding: 3px 4px; border: 0; background: transparent; color: var(--accent); font-size: 10px; }
+.text-button:hover:not(:disabled) { text-decoration: underline; }
+.tree-toolbar .text-button { margin-left: auto; white-space: nowrap; }
+.tree-columns { display: flex; justify-content: space-between; padding: 6px 12px; border-block: 1px solid var(--line); color: #8e9aa3; font-size: 9px; }
+.component-tree, .tree-children { list-style: none; padding: 0; margin: 0; }
+.component-tree { max-height: 380px; overflow: auto; min-height: 90px; }
+.tree-row { display: flex; align-items: center; gap: 5px; min-height: 46px; padding: 6px 11px 6px 8px; border-bottom: 1px solid #f0f3f4; }
+.tree-row:hover { background: #f7faf9; }
+.tree-row.located { background: #edf7f4; }
+.tree-toggle { width: 17px; flex-shrink: 0; padding: 1px 0; border: 0; color: #7f919b; background: transparent; font: 14px/1.4 "Segoe UI", sans-serif; }
+.tree-toggle:disabled { opacity: .35; }
+.tree-badge { display: grid; place-items: center; flex-shrink: 0; width: 21px; height: 23px; color: #488a7f; background: #edf6f3; border: 1px solid #d5eae3; border-radius: 4px; font-size: 10px; }
+.tree-badge.group { color: #7d8796; background: #f2f4f7; border-color: #e1e6ec; }
+.tree-name { display: flex; flex-direction: column; align-items: stretch; min-width: 18px; flex: 1; padding: 0 2px; border: 0; color: #3c4e58; background: transparent; text-align: left; }
+.tree-name-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.tree-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #9aa6ad; font-size: 9px; }
+.tree-name:hover .tree-name-title { color: var(--accent); text-decoration: underline; }
+.tree-size { flex-shrink: 0; white-space: nowrap; font: 500 11px/1.5 "Segoe UI", "Microsoft YaHei", sans-serif; font-variant-numeric: tabular-nums; color: #4f646e; }
+.tree-size.pending { color: #a0aab2; font-size: 10px; }
+.tree-size.failed { color: #ad614b; font-size: 10px; }
+.tree-empty { padding: 28px 16px; color: #9aa6ad; text-align: center; font-size: 11px; }
+.tree-empty:not([hidden]) + .component-tree { display: none; }
+.tree-more { padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.tree-hint { padding: 8px 12px; border-top: 1px solid var(--line); color: #9aa6ad; font-size: 9px; }
 .note { margin: 3px 2px 13px; color: #929da5; font-size: 10px; line-height: 1.75; overflow-wrap: anywhere; }
 .error { margin: 8px 0; padding: 9px 11px; border-radius: 5px; background: #fff0ec; color: #a95640; font-size: 11px; overflow-wrap: anywhere; }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 17px; }

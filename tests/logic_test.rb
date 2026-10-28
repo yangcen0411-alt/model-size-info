@@ -5,11 +5,15 @@ require 'tmpdir'
 
 module Sketchup
   class Drawingelement
-    attr_accessor :name, :definition
+    attr_accessor :name, :definition, :hidden, :locked, :erased
+    attr_reader :persistent_id
     def initialize(definition = nil, name = '')
       @definition, @name = definition, name
+      @persistent_id = (@@next_id = (defined?(@@next_id) ? @@next_id : 100_000) + 1)
     end
-    def valid?; true; end
+    def valid?; !@erased; end
+    def hidden?; !!@hidden; end
+    def locked?; !!@locked; end
   end
   class Group < Drawingelement; end
   class ComponentInstance < Drawingelement; end
@@ -70,6 +74,7 @@ module UI
 end
 
 class ObservableList < Array
+  def add(entity); self << entity; end
   def observers; @observers ||= []; end
   def add_observer(observer); observers << observer; end
   def remove_observer(observer); observers.delete(observer); end
@@ -95,12 +100,18 @@ class TestDefinition
 end
 
 class TestModel
-  attr_accessor :path, :title, :modified
-  attr_reader :selection, :definitions, :entities, :materials, :last_path
+  attr_accessor :path, :title, :modified, :on_navigate
+  attr_reader :selection, :definitions, :entities, :materials, :last_path, :active_path, :active_view
   def initialize
     @path, @title, @modified = '', '', true
     @selection, @definitions, @entities, @materials = 4.times.map { ObservableList.new }
     @observers = []
+    @active_view = TestView.new
+  end
+  def active_path=(path)
+    raise 'Cannot open a locked instance' if path.to_a.any?(&:locked?)
+    @active_path = path
+    @on_navigate.call if @on_navigate
   end
   def valid?; true; end
   def modified?; @modified; end
@@ -114,12 +125,18 @@ class TestModel
   end
 end
 
+class TestView
+  attr_reader :zoomed
+  def zoom(selection); @zoomed = selection.to_a; end
+end
+
 module ModelFootprintTools
   module SizeInfo
-    VERSION = '1.0.0'
+    VERSION = '1.1.0'
   end
 end
 require_relative '../src/model_size_info/analyzer'
+require_relative '../src/model_size_info/component_tree'
 require_relative '../src/model_size_info/panel'
 
 passed = []

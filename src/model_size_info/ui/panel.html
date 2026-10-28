@@ -20,9 +20,10 @@
     <nav class="scope-tabs" aria-label="统计范围">
       <button id="scope-follow" class="active" aria-pressed="true">跟随选择</button>
       <button id="scope-model" aria-pressed="false">整个模型</button>
+      <button id="scope-tree" aria-pressed="false">组件树</button>
     </nav>
 
-    <section class="card primary" aria-live="polite" aria-atomic="true">
+    <section id="primary" class="card primary" aria-live="polite" aria-atomic="true">
       <div class="context-line"><span id="kind" class="type-label">正在连接</span><span id="status" class="status">等待 SketchUp</span></div>
       <h2 id="object-name" title="">—</h2>
       <div class="rule"></div>
@@ -32,13 +33,36 @@
       <div id="progress" class="progress" hidden><span></span></div>
     </section>
 
-    <section class="card properties" aria-label="对象属性">
+    <section id="properties" class="card properties" aria-label="对象属性">
       <dl>
         <div id="selected-row"><dt>选中图元</dt><dd id="selected-count">—</dd></div>
         <div><dt id="definition-label">不同定义</dt><dd id="definition-count">—</dd></div>
         <div id="entities-row"><dt id="entities-label">内部图元（当前层）</dt><dd id="direct-entities">—</dd></div>
         <div id="instances-row"><dt>定义在模型中的实例</dt><dd id="instance-count">—</dd></div>
       </dl>
+    </section>
+
+    <section id="tree-view" class="card tree-card" aria-label="模型组件树" hidden>
+      <div class="tree-heading">
+        <div class="context-line"><span class="type-label">模型组件树</span><span id="tree-status" class="status">等待扫描</span></div>
+        <h2 id="tree-model-name">—</h2>
+        <div class="tree-metrics">
+          <div><strong id="tree-root-count">—</strong><span>顶层对象</span></div>
+          <div><strong id="tree-definition-count">—</strong><span>不同定义</span></div>
+          <div><strong id="tree-measured-count">—</strong><span>已测量</span></div>
+        </div>
+        <p id="tree-detail" class="size-detail" aria-live="polite">按模型层级查看群组和组件。</p>
+        <div id="tree-progress" class="progress" hidden><span></span></div>
+      </div>
+      <div class="tree-toolbar">
+        <label for="tree-sort">同层排序</label>
+        <select id="tree-sort"><option value="size">体积从大到小</option><option value="name">名称</option><option value="model">模型顺序</option></select>
+        <button id="tree-collapse" class="text-button">全部收起</button>
+      </div>
+      <div class="tree-columns"><span>群组 / 组件</span><span>独立 SKP</span></div>
+      <div id="tree-empty" class="tree-empty">正在读取模型层级…</div>
+      <ul id="component-tree" class="component-tree" aria-label="群组和组件层级"></ul>
+      <p class="tree-hint">点击箭头展开 · 点击名称定位对象</p>
     </section>
 
     <section id="breakdown" class="card breakdown" hidden>
@@ -52,7 +76,7 @@
     <div class="actions">
       <button id="measure" class="primary-button">重新测量</button>
       <button id="cancel" class="secondary-button" hidden>停止后续测量</button>
-      <label class="auto-option"><input id="auto" type="checkbox" checked><span>自动测量选择</span></label>
+      <label id="auto-option" class="auto-option"><input id="auto" type="checkbox" checked><span>自动测量选择</span></label>
     </div>
 
     <section class="model-file" aria-label="当前模型文件">
@@ -61,7 +85,8 @@
       <div class="file-meta"><strong id="file-size">—</strong><span id="file-state">尚未保存</span></div>
     </section>
   </main>
-  <footer><span>1 KB = 1024 字节</span><span id="version">v1.0.0</span></footer>
+  <footer><span>1 KB = 1024 字节</span><span id="version">v1.1.0</span></footer>
+  <script src="tree.js"></script>
   <script src="panel.js"></script>
 </body>
 </html>
