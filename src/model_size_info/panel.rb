@@ -370,12 +370,13 @@ module ModelFootprintTools
         @tree_index = nil
         @tree_errors = {}
         @tree_structure_sent = false
+        @tree_scan_rendered_at = nil
         @tree_serial += 1
       end
 
       def tree_snapshot
         index = @tree_index
-        definitions = index ? index.definitions : []
+        definitions = index && index.complete? ? index.definitions : []
         sizes = {}
         definitions.each do |definition|
           cached = @analyzer.cached(definition)
@@ -389,7 +390,8 @@ module ModelFootprintTools
           tree_token: @tree_serial.to_s,
           tree_complete: index ? index.complete? : false,
           tree_root_count: index ? index.root_count : 0,
-          tree_scanned: index ? index.scanned_entities : 0,
+          tree_scanned: index ? index.scanned_instances : 0,
+          tree_scanned_definitions: index ? index.scanned_definitions : 0,
           tree_measured: measured,
           tree_errors: @tree_errors.length,
           tree_sizes: sizes,
@@ -411,6 +413,7 @@ module ModelFootprintTools
         end
         @busy = true
         @job_kind = 'scan'
+        @tree_scan_rendered_at = nil
         render
         scan_tree_next(measure_after, @generation)
       end
@@ -427,7 +430,11 @@ module ModelFootprintTools
               render
               measure_tree if measure_after
             else
-              render
+              now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+              if !@tree_scan_rendered_at || now - @tree_scan_rendered_at >= 0.12
+                render
+                @tree_scan_rendered_at = now
+              end
               scan_tree_next(measure_after, token)
             end
           rescue StandardError => error

@@ -1,25 +1,25 @@
 # 模型占用信息 · SketchUp 插件
 
-版本：1.1.0（开发版）
+版本：1.1.1（开发版）
 
-[下载插件安装包（RBZ）](https://github.com/yangcen0411-alt/model-size-info/raw/refs/heads/main/downloads/model_size_info_v1.1.0.rbz) · [下载源码包](https://github.com/yangcen0411-alt/model-size-info/raw/refs/heads/main/downloads/model_size_info_v1.1.0_source.zip)
+[下载插件安装包（RBZ）](https://github.com/yangcen0411-alt/model-size-info/raw/refs/heads/main/downloads/model_size_info_v1.1.1.rbz) · [下载源码包](https://github.com/yangcen0411-alt/model-size-info/raw/refs/heads/main/downloads/model_size_info_v1.1.1_source.zip)
 
 这是一个类似“图元信息”的独立浮动面板：选择群组或组件后，显示该组件定义单独保存为 SKP 文件的实际字节数，并换算为 KB、MB。没有选择时，显示整个模型上次保存的文件大小。可点击“测量当前模型”，通过临时副本测量包含未保存修改的当前版本。
 
-**1.1.0 新增“组件树”**：按模型中的嵌套层级列出群组和组件，在每项旁显示独立 SKP 大小。支持展开/收起、同层排序、点击名称定位对象，以及停止后继续测量。
+**1.1.1 优化大模型扫描**：参照结构管理器（Outliner）的群组/组件层级，直接通过组件定义的实例清单与父级关系建立目录。扫描代码不再遍历模型或定义中的面、线，也不复制当前选择中的散图元；共享定义只索引一次。保留层级展开、大小排序、定位以及停止后继续测量。
 
 ## 安装和打开
 
 适用于 SketchUp 2022 及更新的桌面版；不适用于网页版。采用这些版本公开的 Ruby API 开发，尚未完成 SketchUp 界面内的实际验证。
 
-1. 下载 `model_size_info_v1.1.0.rbz`，保留 `.rbz` 后缀，无需解压。
+1. 下载 `model_size_info_v1.1.1.rbz`，保留 `.rbz` 后缀，无需解压。
 2. 在 SketchUp 中打开 **扩展程序管理器**，点击 **安装扩展程序**，选择这个文件。不同版本可能将管理器放在“窗口”或“扩展程序”菜单中。
 3. 打开 **扩展程序 → 模型占用信息**。也可以在建模区域右键菜单中打开“模型占用信息”。
 4. 选中一个群组或组件，等待片刻即可查看大小。
 
 这是未经过 Extension Warehouse 签名的开发版。如果 SketchUp 要求批准该扩展，请在管理器中手动批准此插件。无需更改全部扩展的加载策略。
 
-从 1.0.0 升级时，安装新版 RBZ 后重新启动 SketchUp。扩展管理器中的名称仍为“模型占用信息”，版本更新为 1.1.0。
+从旧版升级时，安装新版 RBZ 后重新启动 SketchUp。扩展管理器中的名称仍为“模型占用信息”，版本更新为 1.1.1。
 
 ## 如何使用
 
@@ -41,7 +41,7 @@
 
 1. 打开面板，点击 **组件树**，等待读取模型层级；此时只扫描结构，不自动导出整个模型中的组件。
 2. 点击 **测量组件树**，依次测量实际使用的不同定义，行末显示 KB / MB。相同定义的多个实例分别列出，但只导出一次，共享同一个大小。
-3. 点击左侧箭头展开或收起子项。每层默认按体积从大到小排列，也可以选择“名称”或“模型顺序”。测量过程中保持当前顺序，完成后再更新排序。
+3. 点击左侧箭头展开或收起子项。每层默认按体积从大到小排列，也可以选择“名称”或“对象编号”。对象编号按 SketchUp 的持久 ID 排列，避免为恢复几何集合中的排列而重新遍历面、线。测量过程中保持当前顺序，完成后再更新排序。
 4. 点击名称，选择并缩放到对应对象。定位嵌套对象会打开它的父级编辑环境；若父级锁定或 SketchUp 不允许进入，面板会显示提示，保留锁定状态。
 5. 点击 **停止后续测量** 可暂停未开始的导出；点击 **继续测量** 只测量剩余项。失败项会单独标记，其余定义继续处理。全部完成后点击 **重新测量组件树** 可重新导出全部定义。
 
@@ -50,6 +50,14 @@
 **父级大小已经包含子级内容，不能把各层数值相加。** 此功能显示各定义独立保存为 SKP 的体积，不是每个实例对原模型文件的增量贡献。
 
 修改模型会清除测量缓存并重新扫描层级；点击右上角刷新也可重新扫描。切换文档或关闭面板会取消未完成的任务。
+
+### 扫描速度与测量速度
+
+1.1.0 虽然没有在树中显示面和线，扫描时仍然逐个经过这些图元。1.1.1 改用 `model.definitions` → `definition.instances` → `instance.parent` 建立父子关系，再保留从模型根节点能到达的群组和组件，因此不需要进入原始几何集合。未使用定义中的实例不会出现在最终树中，也不会参与测量。
+
+扫描按工作量和时间预算分段，并降低进度刷新的频率；打开未变化的组件树会复用已建立的目录。面、线不再由插件逐一检查，但组件定义或实例数量特别多时，扫描仍需要时间。
+
+**“扫描目录”和“测量文件体积”是两个步骤。** 跳过面、线只用于建立目录；测量大小仍会将完整组件（包括其面、线、材质和嵌套内容）保存为临时 SKP，保证大小的含义不变。大型组件的单次保存由 SketchUp 同步执行，仍可能短暂等待，不能在单次保存中途停止。未使用用户模型进行原生性能计时，不承诺固定加速倍数。
 
 ## 大小的含义
 
@@ -66,9 +74,9 @@
 
 ## 验证情况
 
-已使用 SketchUp 2026 随附的 Ruby 3.2.2 通过源代码语法检查和 81 项隔离逻辑检查，并使用 Node 通过 42 项面板显示及按钮回调检查。组件树还通过了独立浏览器中的示例界面检查，覆盖 440 / 320 像素窗口和嵌套定位回调。这些检查使用 SketchUp 对象的测试替身，不能替代 SketchUp 内的真实模型导出、原生事件和定位验证。SketchUp 内的人工验收尚未完成，详见 [验证记录](TEST_RESULTS.md)。
+已使用 SketchUp 2026 随附的 Ruby 3.2.2 通过源代码语法检查和 95 项隔离逻辑检查，并使用 Node 通过 42 项面板显示及按钮回调检查。组件树还通过了独立浏览器中的示例界面检查，覆盖 440 / 320 像素窗口和嵌套定位回调。这些检查使用 SketchUp 对象的测试替身，不能替代 SketchUp 内的真实模型导出、原生事件、定位与速度验证。SketchUp 内的人工验收尚未完成，详见 [验证记录](TEST_RESULTS.md)。
 
-测试覆盖实际临时文件字节计数、定义去重、混合选择、失败清理、缓存失效、模型副本、树层级、共享嵌套、队列暂停/继续、错误重试、路径校验、切换文档、关闭和重新打开、中文及特殊字符名称、按钮回调、单位换算与错误状态。详见源码压缩包中的 `tests/`。
+测试覆盖实际临时文件字节计数、定义去重、混合选择、失败清理、缓存失效、模型副本、树层级、共享嵌套、队列暂停/继续、错误重试、路径校验、切换文档、关闭和重新打开、中文及特殊字符名称、按钮回调、单位换算与错误状态。性能回归检查禁止枚举根级、嵌套和未使用定义的几何集合，同时禁止复制选择，验证整个树仍能扫描和测量。详见源码压缩包中的 `tests/`。
 
 ## 源码结构
 
@@ -78,7 +86,7 @@ src/
   model_size_info/
     main.rb                      菜单入口
     analyzer.rb                  定义去重、文件测量和缓存
-    component_tree.rb            组件层级图与对象路径验证
+    component_tree.rb            实例目录、父子层级与对象路径验证
     panel.rb                     面板、监听和测量队列
     ui/
       panel.html
@@ -91,12 +99,15 @@ tests/
   ui_test.cjs
 ```
 
-使用可用的 Ruby 2.7+ 执行 `ruby tests/tree_test.rb`（同时运行原有 42 项检查和新增 39 项组件树检查）；使用 Node 执行 `node tests/ui_test.cjs`。插件不依赖第三方 Ruby gem、网络服务或账号。
+使用可用的 Ruby 2.7+ 执行 `ruby tests/tree_test.rb`（同时运行 42 项原有检查和 53 项组件树检查）；使用 Node 执行 `node tests/ui_test.cjs`。插件不依赖第三方 Ruby gem、网络服务或账号。
 
 重新打包：在项目根目录执行 `python build.py --output-dir dist`，即可生成安装包和源码包。也可以将 `src/` 里面的 `model_size_info.rb` 与同名文件夹放在 ZIP 根目录，再将扩展名改为 `.rbz`；不要把 `src/` 文件夹本身作为压缩包最外层。
 
 ## 官方参考
 
+- [结构管理器中的层级](https://help.sketchup.com/en/sketchup/working-hierarchies-outliner)
+- [组件定义的实例清单](https://ruby.sketchup.com/Sketchup/ComponentDefinition.html#instances-instance_method)
+- [图元的父级关系](https://ruby.sketchup.com/Sketchup/Entity.html#parent-instance_method)
 - [组件定义的副本保存 API](https://ruby.sketchup.com/Sketchup/ComponentDefinition.html#save_copy-instance_method)
 - [模型的副本保存 API](https://ruby.sketchup.com/Sketchup/Model.html#save_copy-instance_method)
 - [模型编辑层级 API](https://ruby.sketchup.com/Sketchup/Model.html#active_path=-instance_method)

@@ -7,7 +7,7 @@ require File.join(__dir__, 'panel')
 
 module ModelFootprintTools
   module SizeInfo
-    VERSION = '1.1.0'.freeze unless const_defined?(:VERSION)
+    VERSION = '1.1.1'.freeze unless const_defined?(:VERSION)
 
     def self.show
       if Sketchup.version.to_i < 22

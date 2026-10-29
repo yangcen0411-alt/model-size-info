@@ -89,7 +89,7 @@
       setText('tree-definition-count', count(data.definition_count));
       setText('tree-measured-count', count(data.tree_measured));
       var scanning = !data.tree_complete;
-      var treeDetail = scanning ? (data.busy ? '正在扫描，已检查 ' + count(data.tree_scanned) + ' 个图元…' : '扫描已暂停，可继续读取层级并测量。') :
+      var treeDetail = scanning ? (data.busy ? '已读取 ' + count(data.tree_scanned) + ' 个群组 / 组件；跳过面、线…' : '扫描已暂停，可继续读取层级并测量。') :
         (data.busy ? '正在测量 ' + count(data.tree_measured) + ' / ' + count(data.definition_count) + ' 个定义…' :
           (data.pending_count ? '还有 ' + count(data.pending_count) + ' 个定义待测量。相同定义只导出一次。' : '父级大小包含子级；各层大小不相加。'));
       setText('tree-detail', treeDetail);

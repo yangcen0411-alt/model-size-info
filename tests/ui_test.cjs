@@ -58,7 +58,7 @@ const base = {
   measurement_state: 'ready', measured_at: null, selected_count: 1, definition_count: 1, direct_entities: 102,
   instance_count: 8, loose_count: 0, pending_count: 0, rows: [{ id: '1', name: '家具组件', kind: '组件', selected_instances: 1, bytes: 1048576 }],
   file: { name: '模型.skp', bytes: 2097152, saved: true, modified: false }, note: '组件定义的独立文件体积。',
-  scope: 'follow', auto: true, auto_limit: 3, busy: false, error: null, version: '1.1.0'
+  scope: 'follow', auto: true, auto_limit: 3, busy: false, error: null, version: '1.1.1'
 };
 api.render(base);
 check('selection renders size and properties', () => { assert.equal(nodes['size-value'].textContent, '1.00'); assert.equal(nodes['size-unit'].textContent, 'MB'); assert.equal(nodes['instance-count'].textContent, '8'); });
@@ -167,7 +167,7 @@ check('finishing applies size sorting within each level and keeps open branches'
   assert.equal(nodes.measure.textContent, '重新测量组件树');
 });
 nodes['tree-sort'].value = 'model'; nodes['tree-sort'].events.change.call(nodes['tree-sort']);
-check('model sorting restores original sibling order', () => assert.equal(rootRows()[0].children[2].children[0].textContent, 'B 餐桌'));
+check('object-ID sorting restores the supplied directory order', () => assert.equal(rootRows()[0].children[2].children[0].textContent, 'B 餐桌'));
 nodes['tree-sort'].value = 'name'; nodes['tree-sort'].events.change.call(nodes['tree-sort']);
 check('name sorting works independently of measured size', () => assert.equal(rootRows()[0].children[2].children[0].textContent, 'A 餐桌'));
 nodes['tree-collapse'].events.click();
@@ -205,6 +205,7 @@ api.render({ ...treeBase, tree_token: 'scanning', tree_complete: false, busy: tr
 check('scanning has a distinct progress message and blocks duplicate exports', () => {
   assert.equal(nodes['tree-status'].textContent, '正在扫描'); assert.match(nodes['tree-detail'].textContent, /2,000/);
   assert.equal(nodes['tree-progress'].hidden, false); assert.equal(nodes.measure.disabled, true);
+  assert.match(nodes['tree-detail'].textContent, /群组.*组件.*跳过面、线/);
 });
 api.render({ ...treeBase, tree_token: 'scanning', tree_complete: false, busy: false, tree_structure: null });
 check('paused hierarchy scans can be resumed explicitly', () => {

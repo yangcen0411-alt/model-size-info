@@ -5,7 +5,7 @@ require 'tmpdir'
 
 module Sketchup
   class Drawingelement
-    attr_accessor :name, :definition, :hidden, :locked, :erased
+    attr_accessor :name, :definition, :hidden, :locked, :erased, :parent
     attr_reader :persistent_id
     def initialize(definition = nil, name = '')
       @definition, @name = definition, name
@@ -80,16 +80,48 @@ class ObservableList < Array
   def remove_observer(observer); observers.delete(observer); end
 end
 
+class TestEntities < ObservableList
+  attr_reader :iteration_count
+  attr_accessor :forbid_iteration
+  def initialize(owner)
+    super()
+    @owner, @iteration_count = owner, 0
+  end
+  def <<(entity)
+    entity.parent = @owner
+    if entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance)
+      entity.definition.instances << entity unless entity.definition.instances.include?(entity)
+    end
+    super
+  end
+  def concat(entities)
+    entities.each { |entity| self << entity }
+    self
+  end
+  def each(&block)
+    raise 'Geometry collection must not be enumerated' if @forbid_iteration
+    @iteration_count += 1
+    super(&block)
+  end
+  def to_a
+    raise 'Geometry collection must not be copied' if @forbid_iteration
+    super
+  end
+end
+
 class TestDefinition
-  attr_accessor :name, :payload_bytes, :fail_save, :copies
-  attr_reader :persistent_id, :entities, :exports, :last_path
+  attr_accessor :name, :payload_bytes, :fail_save, :copies, :image, :erased
+  attr_reader :persistent_id, :entities, :exports, :last_path, :instances
   def initialize(id, name, bytes)
     @persistent_id, @name, @payload_bytes = id, name, bytes
-    @entities = [Sketchup::Face.new, Sketchup::Face.new]
+    @instances = []
+    @entities = TestEntities.new(self)
+    @entities.concat([Sketchup::Face.new, Sketchup::Face.new])
     @exports, @copies = 0, 1
   end
   def count_used_instances; @copies; end
-  def valid?; true; end
+  def valid?; !@erased; end
+  def image?; !!@image; end
   def save_copy(path)
     @exports += 1
     @last_path = path
@@ -98,13 +130,15 @@ class TestDefinition
     true
   end
 end
+Sketchup.const_set(:ComponentDefinition, TestDefinition)
 
 class TestModel
   attr_accessor :path, :title, :modified, :on_navigate
   attr_reader :selection, :definitions, :entities, :materials, :last_path, :active_path, :active_view
   def initialize
     @path, @title, @modified = '', '', true
-    @selection, @definitions, @entities, @materials = 4.times.map { ObservableList.new }
+    @selection, @definitions, @materials = 3.times.map { ObservableList.new }
+    @entities = TestEntities.new(self)
     @observers = []
     @active_view = TestView.new
   end
@@ -132,7 +166,7 @@ end
 
 module ModelFootprintTools
   module SizeInfo
-    VERSION = '1.1.0'
+    VERSION = '1.1.1'
   end
 end
 require_relative '../src/model_size_info/analyzer'

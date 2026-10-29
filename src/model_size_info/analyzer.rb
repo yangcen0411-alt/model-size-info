@@ -52,10 +52,12 @@ module ModelFootprintTools
       end
 
       def snapshot(scope = 'follow')
-        selection = entities
-        whole_model = scope == 'model' || selection.empty?
         file = disk_file
-        if whole_model
+        # Model/tree panels do not need to materialize a potentially huge raw
+        # selection just to ignore it.
+        return snapshot_model(file) if scope == 'model'
+        selection = entities
+        if selection.empty?
           snapshot_model(file)
         else
           snapshot_selection(selection, file)
