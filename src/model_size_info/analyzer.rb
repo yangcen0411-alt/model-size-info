@@ -38,6 +38,10 @@ module ModelFootprintTools
         @cache[definition.persistent_id]
       end
 
+      def cached_by_id(id)
+        @cache[id.to_i]
+      end
+
       def disk_file
         path = @model.path.to_s
         exists = !path.empty? && File.file?(path)

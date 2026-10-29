@@ -36,7 +36,9 @@ module UI
   @timers = {}
   @next_id = 0
   class << self
+    attr_accessor :timer_intervals
     def start_timer(_seconds, _repeat = false, &block)
+      (@timer_intervals ||= []) << _seconds
       @next_id += 1
       @timers[@next_id] = block
       @next_id
@@ -48,15 +50,16 @@ module UI
     end
     def timer_count; @timers.length; end
     def drain
-      30.times { tick if @timers.length > 0 }
+      1000.times { tick if @timers.length > 0 }
       raise 'Timer loop detected' if @timers.length > 0
     end
   end
   class HtmlDialog
     STYLE_UTILITY = 2
-    attr_reader :callbacks, :last_data, :path
+    attr_reader :callbacks, :last_data, :path, :history
     def initialize(_options)
       @callbacks = {}
+      @history = []
     end
     def set_file(path); @path = path; end
     def add_action_callback(name, &block); @callbacks[name] = block; end
@@ -69,6 +72,7 @@ module UI
     def execute_script(script)
       payload = script.sub('window.ModelSizeInfo.render(', '').sub(/\);\z/, '')
       @last_data = JSON.parse(payload)
+      @history << @last_data
     end
   end
 end
@@ -81,11 +85,12 @@ class ObservableList < Array
 end
 
 class TestEntities < ObservableList
-  attr_reader :iteration_count
+  attr_reader :iteration_count, :grep_calls
   attr_accessor :forbid_iteration
   def initialize(owner)
     super()
     @owner, @iteration_count = owner, 0
+    @grep_calls = []
   end
   def <<(entity)
     entity.parent = @owner
@@ -105,6 +110,10 @@ class TestEntities < ObservableList
   end
   def to_a
     raise 'Geometry collection must not be copied' if @forbid_iteration
+    super
+  end
+  def grep(type)
+    @grep_calls << type
     super
   end
 end
@@ -166,7 +175,7 @@ end
 
 module ModelFootprintTools
   module SizeInfo
-    VERSION = '1.1.1'
+    VERSION = '1.2.0'
   end
 end
 require_relative '../src/model_size_info/analyzer'

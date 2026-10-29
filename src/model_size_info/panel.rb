@@ -96,6 +96,8 @@ module ModelFootprintTools
 
     class Panel
       AUTO_LIMIT = 3
+      EXPORT_BATCH_LIMIT = 20
+      EXPORT_SLICE_SECONDS = 0.012
 
       def initialize
         @dialog = nil
@@ -245,13 +247,20 @@ module ModelFootprintTools
       def callbacks
         @dialog.add_action_callback('ready') do |_context|
           @ready = true
+          @tree_index.resend if @tree_index
+          @tree_sizes_sent = {}
           refresh
         end
         @dialog.add_action_callback('scope') do |_context, scope|
           next unless %w[follow model tree].include?(scope)
           next if @scope == scope
           @scope = scope
-          schedule
+          if scope == 'tree'
+            cancel
+            refresh
+          else
+            schedule
+          end
         end
         @dialog.add_action_callback('auto') do |_context, value|
           @auto = value == true
@@ -266,6 +275,15 @@ module ModelFootprintTools
         end
         @dialog.add_action_callback('locate') do |_context, request|
           locate_tree_item(request)
+        end
+        @dialog.add_action_callback('expand') do |_context, request|
+          expand_tree_item(request)
+        end
+        @dialog.add_action_callback('load_all') do |_context|
+          next unless active? && @scope == 'tree'
+          @tree_index ||= ComponentTree.new(@model)
+          @tree_index.request_all
+          scan_tree(false) unless @busy
         end
       end
 
@@ -311,32 +329,39 @@ module ModelFootprintTools
       end
 
       def measure_next(queue, token, force)
-        @job_timer = UI.start_timer(0.08, false) do
+        @job_timer = UI.start_timer(0.001, false) do
           @job_timer = nil
           next unless token == @generation && active?
-          begin
-            definition = queue.shift
-            if definition && definition.valid?
-              @measuring = true
-              @analyzer.measure_definition(definition, force)
+          deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + EXPORT_SLICE_SECONDS
+          EXPORT_BATCH_LIMIT.times do
+            break unless token == @generation && active?
+            begin
+              definition = queue.shift
+              if definition && definition.valid?
+                @measuring = true
+                @analyzer.measure_definition(definition, force)
+              end
+            rescue StandardError => error
+              if @scope == 'tree' && definition
+                @tree_errors[definition.persistent_id.to_s] = error.message
+                @error = "#{@tree_errors.length} 个定义测量失败；成功结果已保留，可点击下方按钮重试未完成项。"
+              else
+                @error = error.message
+                queue.clear
+              end
+            ensure
+              @measuring = false
             end
-          rescue StandardError => error
-            if @scope == 'tree' && definition
-              @tree_errors[definition.persistent_id.to_s] = error.message
-              @error = "#{@tree_errors.length} 个定义测量失败；成功结果已保留，可点击下方按钮重试未完成项。"
-            else
-              @error = error.message
-              queue.clear
-            end
-          ensure
-            @measuring = false
+            break if queue.empty? || Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
           end
+          next render unless token == @generation && active?
           if queue.empty?
             @busy = false
             @job_kind = nil
             render
+            scan_tree(false) if @scope == 'tree' && @tree_index && !@tree_index.complete?
           else
-            render
+            progress_render
             measure_next(queue, token, force)
           end
         end
@@ -356,7 +381,10 @@ module ModelFootprintTools
         # the embedded Chromium versions used by older SketchUp releases.
         payload = JSON.generate(data).gsub("\u2028", '\\u2028').gsub("\u2029", '\\u2029')
         @dialog.execute_script("window.ModelSizeInfo.render(#{payload});")
-        @tree_structure_sent = true if data[:tree_structure]
+        if data[:kind] == 'tree'
+          @tree_index.acknowledge_delta if @tree_index && data[:tree_structure]
+          @tree_sizes_sent.merge!(data[:tree_sizes])
+        end
       rescue StandardError => error
         warn("[模型占用信息] #{error.class}: #{error.message}")
       end
@@ -369,26 +397,29 @@ module ModelFootprintTools
       def reset_tree
         @tree_index = nil
         @tree_errors = {}
-        @tree_structure_sent = false
+        @tree_sizes_sent = {}
         @tree_scan_rendered_at = nil
         @tree_serial += 1
       end
 
       def tree_snapshot
         index = @tree_index
-        definitions = index && index.complete? ? index.definitions : []
+        definitions = index ? index.definitions_by_id : {}
         sizes = {}
-        definitions.each do |definition|
-          cached = @analyzer.cached(definition)
-          id = definition.persistent_id.to_s
-          sizes[id] = { bytes: cached && cached[:bytes], error: @tree_errors[id] }
+        measured = 0
+        definitions.each_key do |id|
+          cached = @analyzer.cached_by_id(id)
+          value = { bytes: cached && cached[:bytes], error: @tree_errors[id] }
+          measured += 1 if cached
+          sizes[id] = value if @tree_sizes_sent[id] != value
         end
-        measured = sizes.values.count { |entry| !entry[:bytes].nil? }
         data = @analyzer.snapshot('model')
         data.merge!(
           kind: 'tree', bytes: nil, subtitle: '模型组件树',
           tree_token: @tree_serial.to_s,
           tree_complete: index ? index.complete? : false,
+          tree_all_loaded: index ? index.all_loaded? : false,
+          tree_read_seconds: index && index.last_read_seconds,
           tree_root_count: index ? index.root_count : 0,
           tree_scanned: index ? index.scanned_instances : 0,
           tree_scanned_definitions: index ? index.scanned_definitions : 0,
@@ -397,8 +428,8 @@ module ModelFootprintTools
           tree_sizes: sizes,
           definition_count: definitions.length,
           pending_count: definitions.length - measured,
-          tree_structure: index && index.complete? && !@tree_structure_sent ? index.payload : nil,
-          note: '每项为其定义单独保存的 SKP 大小；父级已包含子级，不能逐行相加。相同定义共享测量结果。隐藏、锁定项也会列出。'
+          tree_structure: index && index.delta,
+          note: '目录按需读取，展开时加载子级；可点击“读取全部层级”查看全模型。每项为独立 SKP 大小，父级已包含子级，不能逐行相加。'
         )
         data
       end
@@ -419,22 +450,19 @@ module ModelFootprintTools
       end
 
       def scan_tree_next(measure_after, token)
-        @job_timer = UI.start_timer(0.02, false) do
+        @job_timer = UI.start_timer(0.001, false) do
           @job_timer = nil
           next unless token == @generation && active? && @scope == 'tree'
           begin
             complete = @tree_index.step
+            next unless token == @generation && active? && @scope == 'tree'
             if complete
               @busy = false
               @job_kind = nil
               render
               measure_tree if measure_after
             else
-              now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-              if !@tree_scan_rendered_at || now - @tree_scan_rendered_at >= 0.12
-                render
-                @tree_scan_rendered_at = now
-              end
+              progress_render
               scan_tree_next(measure_after, token)
             end
           rescue StandardError => error
@@ -483,6 +511,26 @@ module ModelFootprintTools
       ensure
         @navigating = false
         render
+      end
+
+      def progress_render
+        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        if !@tree_scan_rendered_at || now - @tree_scan_rendered_at >= 0.12
+          render
+          @tree_scan_rendered_at = now
+        end
+      end
+
+      def expand_tree_item(request)
+        return unless active? && @scope == 'tree'
+        unless request.is_a?(Hash) && request['token'] == @tree_serial.to_s && @tree_index
+          raise '组件树已更新，请重新展开对象。'
+        end
+        entity = @tree_index.resolve(request['path']).last
+        @tree_index.request(entity.definition.persistent_id.to_s)
+        @busy ? render : scan_tree(false)
+      rescue StandardError => error
+        show_error(error)
       end
     end
   end

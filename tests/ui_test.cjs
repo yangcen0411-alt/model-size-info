@@ -23,7 +23,7 @@ class Element {
   removeChild(child) { this.children.splice(this.children.indexOf(child), 1); }
   addEventListener(event, callback) { this.events[event] = callback; }
   setAttribute(name, value) { this.attributes[name] = value; }
-  focus() { this.focused = true; }
+  focus() { this.focused = true; if (this.ownerDocument) this.ownerDocument.activeElement = this; }
 }
 
 function mount(connected = true) {
@@ -31,12 +31,13 @@ function mount(connected = true) {
   const events = {};
   const messages = [];
   const bridge = {};
-  for (const name of ['ready', 'scope', 'auto', 'measure', 'refresh', 'cancel', 'locate']) bridge[name] = (...args) => messages.push({ name, args });
+  for (const name of ['ready', 'scope', 'auto', 'measure', 'refresh', 'cancel', 'locate', 'expand', 'load_all']) bridge[name] = (...args) => messages.push({ name, args });
   const document = {
     getElementById(id) { assert.ok(nodes[id], 'Missing HTML element ' + id); return nodes[id]; },
-    createElement(tag) { return new Element(tag); },
+    createElement(tag) { const element = new Element(tag); element.ownerDocument = document; return element; },
     addEventListener(event, callback) { events[event] = callback; }
   };
+  Object.values(nodes).forEach(element => { element.ownerDocument = document; });
   const window = connected ? { sketchup: bridge } : {};
   const context = vm.createContext({ window, document, Intl, Number });
   vm.runInContext(treeSource, context);
@@ -58,7 +59,7 @@ const base = {
   measurement_state: 'ready', measured_at: null, selected_count: 1, definition_count: 1, direct_entities: 102,
   instance_count: 8, loose_count: 0, pending_count: 0, rows: [{ id: '1', name: '家具组件', kind: '组件', selected_instances: 1, bytes: 1048576 }],
   file: { name: '模型.skp', bytes: 2097152, saved: true, modified: false }, note: '组件定义的独立文件体积。',
-  scope: 'follow', auto: true, auto_limit: 3, busy: false, error: null, version: '1.1.1'
+  scope: 'follow', auto: true, auto_limit: 3, busy: false, error: null, version: '1.2.0'
 };
 api.render(base);
 check('selection renders size and properties', () => { assert.equal(nodes['size-value'].textContent, '1.00'); assert.equal(nodes['size-unit'].textContent, 'MB'); assert.equal(nodes['instance-count'].textContent, '8'); });
@@ -112,7 +113,7 @@ const graph = {
   }
 };
 const treeBase = { ...base, kind: 'tree', scope: 'tree', rows: [], bytes: null,
-  tree_token: 'tree-1', tree_complete: true, tree_root_count: 3, tree_scanned: 125, tree_measured: 0,
+  tree_token: 'tree-1', tree_complete: true, tree_all_loaded: true, tree_root_count: 3, tree_scanned: 125, tree_measured: 0,
   tree_errors: 0, pending_count: 2, definition_count: 2, tree_sizes: { '501': { bytes: null }, '502': { bytes: null } },
   tree_structure: graph, note: '父级已包含子级，不能逐行相加。'
 };
@@ -124,7 +125,7 @@ check('tree mode replaces the single-size panel and keeps range state accessible
 });
 check('tree header counts roots and unique definitions without an aggregate file total', () => {
   assert.equal(nodes['tree-root-count'].textContent, '3'); assert.equal(nodes['tree-definition-count'].textContent, '2');
-  assert.equal(nodes['tree-measured-count'].textContent, '0'); assert.equal(nodes.measure.textContent, '测量组件树');
+  assert.equal(nodes['tree-measured-count'].textContent, '0'); assert.equal(nodes.measure.textContent, '测量全部定义');
 });
 check('tree initially draws only roots and uses a stable name tie-breaker', () => {
   assert.equal(allRows().length, 3); assert.equal(rootRows()[0].children[2].children[0].textContent, 'A 餐桌');
@@ -164,7 +165,7 @@ api.render({ ...measuredTree, busy: false });
 check('finishing applies size sorting within each level and keeps open branches', () => {
   assert.equal(rootRows()[0].children[2].children[0].textContent, 'C 台灯');
   assert.equal(rootRows()[1].children[2].children[0].textContent, 'A 餐桌'); assert.equal(allRows().length, 4);
-  assert.equal(nodes.measure.textContent, '重新测量组件树');
+  assert.equal(nodes.measure.textContent, '重新测量全部');
 });
 nodes['tree-sort'].value = 'model'; nodes['tree-sort'].events.change.call(nodes['tree-sort']);
 check('object-ID sorting restores the supplied directory order', () => assert.equal(rootRows()[0].children[2].children[0].textContent, 'B 餐桌'));
@@ -201,15 +202,15 @@ check('recursive references stop at a labeled non-expandable child', () => {
   assert.equal(allRows().length, 2); assert.equal(allRows()[1].children[0].disabled, true);
   assert.match(allRows()[1].children[2].children[1].textContent, /循环引用/);
 });
-api.render({ ...treeBase, tree_token: 'scanning', tree_complete: false, busy: true, tree_structure: null, tree_scanned: 2000 });
+api.render({ ...treeBase, tree_token: 'scanning', tree_complete: false, busy: true, job_kind: 'scan', tree_structure: null, definition_count: 2000 });
 check('scanning has a distinct progress message and blocks duplicate exports', () => {
   assert.equal(nodes['tree-status'].textContent, '正在扫描'); assert.match(nodes['tree-detail'].textContent, /2,000/);
   assert.equal(nodes['tree-progress'].hidden, false); assert.equal(nodes.measure.disabled, true);
-  assert.match(nodes['tree-detail'].textContent, /群组.*组件.*跳过面、线/);
+  assert.match(nodes['tree-detail'].textContent, /请求的层级/);
 });
 api.render({ ...treeBase, tree_token: 'scanning', tree_complete: false, busy: false, tree_structure: null });
 check('paused hierarchy scans can be resumed explicitly', () => {
-  assert.equal(nodes.measure.textContent, '继续扫描并测量'); assert.equal(nodes.measure.disabled, false);
+  assert.equal(nodes.measure.textContent, '继续读取并测量'); assert.equal(nodes.measure.disabled, false);
   assert.match(nodes['tree-empty'].textContent, /暂停/);
 });
 api.render({ ...treeBase, tree_token: 'empty', tree_root_count: 0, tree_measured: 0, pending_count: 0, definition_count: 0,
@@ -221,4 +222,49 @@ api.render(base);
 check('switching back restores the existing selection panel', () => {
   assert.equal(nodes.primary.hidden, false); assert.equal(nodes['tree-view'].hidden, true); assert.equal(nodes['auto-option'].hidden, false);
 });
+
+const lazy = { ...treeBase, tree_token: 'lazy', tree_all_loaded: false, tree_root_count: 2,
+  definition_count: 1, pending_count: 0, tree_measured: 1, tree_read_seconds: 0.03,
+  tree_structure: { roots: [graph.roots[0], graph.roots[2]], definitions: { '502': { name: '餐桌', loaded: false, children: null } } },
+  tree_sizes: { '502': { bytes: 32768 } }
+};
+api.render(lazy);
+check('lazy trees explain partial loading and offer explicit full reading', () => {
+  assert.equal(rootRows().length, 2); assert.equal(nodes['load-all'].hidden, false);
+  assert.match(nodes['tree-detail'].textContent, /展开时读取子项.*0.03/); assert.equal(nodes.measure.textContent, '重新测量已读取项');
+});
+rootRows()[0].children[0].events.click();
+check('opening an unread branch sends one scoped expansion request', () => {
+  assert.equal(messages.at(-1).name, 'expand'); assert.equal(messages.at(-1).args[0].path, '12');
+  assert.equal(messages.at(-1).args[0].token, 'lazy'); assert.equal(allRows().length, 2);
+});
+api.render({ ...lazy, busy: true, job_kind: 'scan', tree_complete: false,
+  tree_sizes: {}, tree_structure: { roots: null, definitions: { '502': { name: '餐桌', loaded: false, loading: true, children: null } } } });
+check('reading a branch keeps existing roots, cached sizes, expansion and focus', () => {
+  assert.equal(rootRows().length, 2); assert.equal(rootRows()[0].children[3].textContent, '32.00 KB');
+  assert.equal(rootRows()[0].children[0].attributes['aria-expanded'], 'true'); assert.equal(rootRows()[0].children[0].focused, true);
+});
+api.render({ ...lazy, pending_count: 1, definition_count: 2, tree_sizes: { '501': { bytes: null } },
+  tree_structure: { roots: null, definitions: {
+    '502': { name: '餐桌', loaded: true, children: graph.definitions['502'].children },
+    '501': { name: '台灯', loaded: false, children: null }
+  } } });
+check('a structure delta reveals only the requested child level', () => {
+  assert.equal(allRows().length, 3); assert.equal(allRows()[1].children[2].children[0].textContent, malicious);
+  assert.equal(rootRows()[0].children[3].textContent, '32.00 KB');
+});
+const beforeCacheToggle = messages.length;
+rootRows()[0].children[0].events.click(); rootRows()[0].children[0].events.click();
+check('reopening a cached branch does not ask SketchUp to read it again', () => assert.equal(messages.length, beforeCacheToggle));
+rootRows()[1].children[0].events.click();
+check('another instance of a loaded definition shares its children without a new read', () => {
+  assert.equal(allRows().length, 4); assert.equal(messages.length, beforeCacheToggle);
+});
+api.render({ ...lazy, tree_complete: false, busy: true, job_kind: 'tree', tree_structure: null, tree_sizes: {} });
+check('an expansion queued during measurement does not mislabel exports as scanning', () => assert.equal(nodes['tree-status'].textContent, '正在测量'));
+api.render({ ...lazy, tree_structure: null, tree_sizes: {} });
+nodes['load-all'].events.click();
+check('full directory reading requires the explicit native callback', () => assert.equal(messages.at(-1).name, 'load_all'));
+api.render({ ...lazy, tree_all_loaded: true, tree_structure: null, tree_sizes: {} });
+check('the full-directory button disappears once every level is loaded', () => assert.equal(nodes['load-all'].hidden, true));
 console.log(checks + ' UI logic checks passed.');

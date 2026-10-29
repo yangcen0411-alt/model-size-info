@@ -51,6 +51,7 @@
     var isTree = data.kind === 'tree';
     setHidden('primary', isTree); setHidden('properties', isTree); setHidden('tree-view', !isTree);
     setHidden('auto-option', isTree);
+    setHidden('load-all', !isTree || !!data.tree_all_loaded);
     var parts = formatBytes(data.bytes);
     setText('kind', data.subtitle);
     setText('object-name', data.title); $('object-name').title = data.title;
@@ -88,17 +89,20 @@
       setText('tree-root-count', count(data.tree_root_count));
       setText('tree-definition-count', count(data.definition_count));
       setText('tree-measured-count', count(data.tree_measured));
-      var scanning = !data.tree_complete;
-      var treeDetail = scanning ? (data.busy ? '已读取 ' + count(data.tree_scanned) + ' 个群组 / 组件；跳过面、线…' : '扫描已暂停，可继续读取层级并测量。') :
+      var scanning = data.job_kind === 'scan' || (!data.tree_complete && data.job_kind !== 'tree');
+      var treeDetail = scanning ? (data.busy ? '正在读取请求的层级，已发现 ' + count(data.definition_count) + ' 个定义…' : '读取已暂停，可继续读取层级并测量。') :
         (data.busy ? '正在测量 ' + count(data.tree_measured) + ' / ' + count(data.definition_count) + ' 个定义…' :
-          (data.pending_count ? '还有 ' + count(data.pending_count) + ' 个定义待测量。相同定义只导出一次。' : '父级大小包含子级；各层大小不相加。'));
+          (data.tree_all_loaded ? '全部层级已读取。' : '当前层级已就绪；展开时读取子项。') +
+          (data.pending_count ? '待测量 ' + count(data.pending_count) + ' 个定义。' : '父级包含子级，不逐层相加。'));
+      if (!data.busy && data.tree_read_seconds != null) treeDetail += ' 最近读取 ' + data.tree_read_seconds.toFixed(2) + ' 秒。';
       setText('tree-detail', treeDetail);
       setText('tree-status', data.error ? (data.tree_errors ? '部分失败' : '查看提示') : (data.busy ? (scanning ? '正在扫描' : '正在测量') : (data.pending_count ? '待测量' : (scanning ? '已暂停' : '已就绪'))));
       $('tree-status').className = 'status ' + (data.error ? 'error' : (data.busy ? 'busy' : (!data.pending_count && !scanning ? 'ready' : '')));
       setHidden('tree-progress', !data.busy);
-      setText('measure', scanning ? '继续扫描并测量' : (data.pending_count ? (data.tree_measured ? '继续测量' : '测量组件树') : '重新测量组件树'));
+      setText('measure', scanning ? '继续读取并测量' : (data.pending_count ? (data.tree_measured ? '继续测量' : (data.tree_all_loaded ? '测量全部定义' : '测量已读取项')) : (data.tree_all_loaded ? '重新测量全部' : '重新测量已读取项')));
       $('measure').disabled = data.busy || (data.tree_complete && data.definition_count === 0);
     }
+    $('load-all').disabled = data.busy;
     $('refresh').disabled = data.busy;
     $('auto').checked = data.auto;
     setText('file-name', data.file.name); $('file-name').title = data.file.name;
@@ -123,6 +127,7 @@
   $('measure').addEventListener('click', function () { send('measure'); });
   $('cancel').addEventListener('click', function () { send('cancel'); });
   $('refresh').addEventListener('click', function () { send('refresh'); });
+  $('load-all').addEventListener('click', function () { send('load_all'); });
 
   window.ModelSizeInfo = { render: render, formatBytes: formatBytes, getState: function () { return current; } };
   document.addEventListener('DOMContentLoaded', function () {

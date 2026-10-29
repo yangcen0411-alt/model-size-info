@@ -48,7 +48,7 @@
         <h2 id="tree-model-name">—</h2>
         <div class="tree-metrics">
           <div><strong id="tree-root-count">—</strong><span>顶层对象</span></div>
-          <div><strong id="tree-definition-count">—</strong><span>不同定义</span></div>
+          <div><strong id="tree-definition-count">—</strong><span>已发现定义</span></div>
           <div><strong id="tree-measured-count">—</strong><span>已测量</span></div>
         </div>
         <p id="tree-detail" class="size-detail" aria-live="polite">按模型层级查看群组和组件。</p>
@@ -76,6 +76,7 @@
     <div class="actions">
       <button id="measure" class="primary-button">重新测量</button>
       <button id="cancel" class="secondary-button" hidden>停止后续测量</button>
+      <button id="load-all" class="secondary-button" hidden>读取全部层级</button>
       <label id="auto-option" class="auto-option"><input id="auto" type="checkbox" checked><span>自动测量选择</span></label>
     </div>
 
@@ -85,7 +86,7 @@
       <div class="file-meta"><strong id="file-size">—</strong><span id="file-state">尚未保存</span></div>
     </section>
   </main>
-  <footer><span>1 KB = 1024 字节</span><span id="version">v1.1.1</span></footer>
+  <footer><span>1 KB = 1024 字节</span><span id="version">v1.2.0</span></footer>
   <script src="tree.js"></script>
   <script src="panel.js"></script>
 </body>
