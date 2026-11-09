@@ -175,7 +175,7 @@ end
 
 module ModelFootprintTools
   module SizeInfo
-    VERSION = '1.2.0'
+    VERSION = '1.3.0'
   end
 end
 require_relative '../src/model_size_info/analyzer'
@@ -262,6 +262,7 @@ panel = ModelFootprintTools::SizeInfo::Panel.new
 panel.show
 dialog = panel.instance_variable_get(:@dialog)
 check.call('panel HTML is packaged at its expected relative path') { File.file?(dialog.path) }
+dialog.event('scope', 'follow')
 dialog.event('ready')
 check.call('ready callback starts automatic measurement') { dialog.last_data['busy'] == true && UI.timer_count == 1 }
 UI.drain

@@ -52,6 +52,7 @@
     setHidden('primary', isTree); setHidden('properties', isTree); setHidden('tree-view', !isTree);
     setHidden('auto-option', isTree);
     setHidden('load-all', !isTree || !!data.tree_all_loaded);
+    $('measure').className = isTree ? 'secondary-button' : 'primary-button';
     var parts = formatBytes(data.bytes);
     setText('kind', data.subtitle);
     setText('object-name', data.title); $('object-name').title = data.title;
@@ -92,14 +93,15 @@
       var scanning = data.job_kind === 'scan' || (!data.tree_complete && data.job_kind !== 'tree');
       var treeDetail = scanning ? (data.busy ? '正在读取请求的层级，已发现 ' + count(data.definition_count) + ' 个定义…' : '读取已暂停，可继续读取层级并测量。') :
         (data.busy ? '正在测量 ' + count(data.tree_measured) + ' / ' + count(data.definition_count) + ' 个定义…' :
-          (data.tree_all_loaded ? '全部层级已读取。' : '当前层级已就绪；展开时读取子项。') +
-          (data.pending_count ? '待测量 ' + count(data.pending_count) + ' 个定义。' : '父级包含子级，不逐层相加。'));
+          (data.tree_all_loaded ? '全部层级已读取。' : '当前层级已就绪，展开时读取子项。') +
+          (data.pending_count ? '点击行内“计算大小”查看体积。' : '父级包含子级，逐项查看。'));
+      if (data.tree_measuring_id && data.busy) treeDetail = '正在计算所点项目的完整 SKP 体积…';
       if (!data.busy && data.tree_read_seconds != null) treeDetail += ' 最近读取 ' + data.tree_read_seconds.toFixed(2) + ' 秒。';
       setText('tree-detail', treeDetail);
-      setText('tree-status', data.error ? (data.tree_errors ? '部分失败' : '查看提示') : (data.busy ? (scanning ? '正在扫描' : '正在测量') : (data.pending_count ? '待测量' : (scanning ? '已暂停' : '已就绪'))));
-      $('tree-status').className = 'status ' + (data.error ? 'error' : (data.busy ? 'busy' : (!data.pending_count && !scanning ? 'ready' : '')));
+      setText('tree-status', data.error ? (data.tree_errors ? '计算失败' : '查看提示') : (data.busy ? (scanning ? '正在扫描' : '正在计算') : (scanning ? '已暂停' : '层级已就绪')));
+      $('tree-status').className = 'status ' + (data.error ? 'error' : (data.busy ? 'busy' : (!scanning ? 'ready' : '')));
       setHidden('tree-progress', !data.busy);
-      setText('measure', scanning ? '继续读取并测量' : (data.pending_count ? (data.tree_measured ? '继续测量' : (data.tree_all_loaded ? '测量全部定义' : '测量已读取项')) : (data.tree_all_loaded ? '重新测量全部' : '重新测量已读取项')));
+      setText('measure', scanning ? '继续读取并批量计算' : (data.pending_count ? '批量计算已读取项' : '批量重新计算'));
       $('measure').disabled = data.busy || (data.tree_complete && data.definition_count === 0);
     }
     $('load-all').disabled = data.busy;
@@ -135,7 +137,10 @@
     else {
       setText('status', '未连接 SketchUp');
       setText('size-detail', '请从 SketchUp 的扩展菜单打开此面板。');
+      setText('tree-status', '未连接 SketchUp');
+      setText('tree-empty', '请从 SketchUp 的扩展菜单打开此面板。');
       $('measure').disabled = true;
+      $('load-all').disabled = true;
     }
   });
 }());

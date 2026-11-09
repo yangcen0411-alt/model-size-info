@@ -42,6 +42,10 @@ module ModelFootprintTools
         @cache[id.to_i]
       end
 
+      def invalidate_definition(definition)
+        @cache.delete(definition.persistent_id)
+      end
+
       def disk_file
         path = @model.path.to_s
         exists = !path.empty? && File.file?(path)

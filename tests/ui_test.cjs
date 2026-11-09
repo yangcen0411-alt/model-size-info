@@ -31,7 +31,7 @@ function mount(connected = true) {
   const events = {};
   const messages = [];
   const bridge = {};
-  for (const name of ['ready', 'scope', 'auto', 'measure', 'refresh', 'cancel', 'locate', 'expand', 'load_all']) bridge[name] = (...args) => messages.push({ name, args });
+  for (const name of ['ready', 'scope', 'auto', 'measure', 'measure_item', 'refresh', 'cancel', 'locate', 'expand', 'load_all']) bridge[name] = (...args) => messages.push({ name, args });
   const document = {
     getElementById(id) { assert.ok(nodes[id], 'Missing HTML element ' + id); return nodes[id]; },
     createElement(tag) { const element = new Element(tag); element.ownerDocument = document; return element; },
@@ -59,7 +59,7 @@ const base = {
   measurement_state: 'ready', measured_at: null, selected_count: 1, definition_count: 1, direct_entities: 102,
   instance_count: 8, loose_count: 0, pending_count: 0, rows: [{ id: '1', name: '家具组件', kind: '组件', selected_instances: 1, bytes: 1048576 }],
   file: { name: '模型.skp', bytes: 2097152, saved: true, modified: false }, note: '组件定义的独立文件体积。',
-  scope: 'follow', auto: true, auto_limit: 3, busy: false, error: null, version: '1.2.0'
+  scope: 'follow', auto: true, auto_limit: 3, busy: false, error: null, version: '1.3.0'
 };
 api.render(base);
 check('selection renders size and properties', () => { assert.equal(nodes['size-value'].textContent, '1.00'); assert.equal(nodes['size-unit'].textContent, 'MB'); assert.equal(nodes['instance-count'].textContent, '8'); });
@@ -90,7 +90,10 @@ check('all controls call the correct native bridge with typed arguments', () => 
   ]);
 });
 const offline = mount(false);
-check('opening HTML outside SketchUp never pretends to measure a model', () => { assert.equal(offline.nodes.measure.disabled, true); assert.match(offline.nodes.status.textContent, /未连接/); });
+check('opening HTML outside SketchUp never pretends to measure a model', () => {
+  assert.equal(offline.nodes.measure.disabled, true); assert.match(offline.nodes.status.textContent, /未连接/);
+  assert.match(offline.nodes['tree-status'].textContent, /未连接/); assert.match(offline.nodes['tree-empty'].textContent, /扩展菜单/);
+});
 
 function rootRows() { return nodes['component-tree'].children.filter(item => item.children[0] && item.children[0].className === 'tree-row').map(item => item.children[0]); }
 function allRows(element = nodes['component-tree']) {
@@ -125,11 +128,11 @@ check('tree mode replaces the single-size panel and keeps range state accessible
 });
 check('tree header counts roots and unique definitions without an aggregate file total', () => {
   assert.equal(nodes['tree-root-count'].textContent, '3'); assert.equal(nodes['tree-definition-count'].textContent, '2');
-  assert.equal(nodes['tree-measured-count'].textContent, '0'); assert.equal(nodes.measure.textContent, '测量全部定义');
+  assert.equal(nodes['tree-measured-count'].textContent, '0'); assert.equal(nodes.measure.textContent, '批量计算已读取项');
 });
 check('tree initially draws only roots and uses a stable name tie-breaker', () => {
   assert.equal(allRows().length, 3); assert.equal(rootRows()[0].children[2].children[0].textContent, 'A 餐桌');
-  assert.equal(rootRows()[0].children[3].textContent, '待测量');
+  assert.equal(rootRows()[0].children[3].textContent, '未计算');
 });
 rootRows()[0].children[0].events.click();
 check('expanding a branch lazily draws its nested children', () => {
@@ -154,7 +157,7 @@ check('progress updates patch sizes without destroying expanded rows or focus', 
 });
 api.render({ ...partialTree, busy: false });
 check('stopped measurements preserve expansion and offer continuation', () => {
-  assert.equal(allRows().length, 4); assert.equal(nodes.measure.textContent, '继续测量');
+  assert.equal(allRows().length, 4); assert.equal(nodes.measure.textContent, '批量计算已读取项');
   assert.equal(nodes.cancel.hidden, true); assert.equal(nodes.measure.disabled, false);
 });
 const measuredTree = { ...partialTree, busy: true, pending_count: 0, tree_measured: 2,
@@ -165,7 +168,7 @@ api.render({ ...measuredTree, busy: false });
 check('finishing applies size sorting within each level and keeps open branches', () => {
   assert.equal(rootRows()[0].children[2].children[0].textContent, 'C 台灯');
   assert.equal(rootRows()[1].children[2].children[0].textContent, 'A 餐桌'); assert.equal(allRows().length, 4);
-  assert.equal(nodes.measure.textContent, '重新测量全部');
+  assert.equal(nodes.measure.textContent, '批量重新计算');
 });
 nodes['tree-sort'].value = 'model'; nodes['tree-sort'].events.change.call(nodes['tree-sort']);
 check('object-ID sorting restores the supplied directory order', () => assert.equal(rootRows()[0].children[2].children[0].textContent, 'B 餐桌'));
@@ -177,7 +180,7 @@ api.render({ ...measuredTree, busy: false, error: '1 个定义测量失败', tre
   tree_sizes: { '502': { bytes: null, error: '没有足够空间' }, '501': { bytes: 65536 } } });
 check('definition failures display a specific tooltip and keep successful values', () => {
   assert.equal(rootRows()[0].children[3].textContent, '失败'); assert.equal(rootRows()[0].children[3].title, '没有足够空间');
-  assert.equal(rootRows()[2].children[3].textContent, '64.00 KB'); assert.equal(nodes['tree-status'].textContent, '部分失败');
+  assert.equal(rootRows()[2].children[3].textContent, '64.00 KB'); assert.equal(nodes['tree-status'].textContent, '计算失败');
 });
 nodes['scope-tree'].events.click();
 check('tree tab calls the native scope callback', () => assert.equal(messages.at(-1).args[0], 'tree'));
@@ -210,7 +213,7 @@ check('scanning has a distinct progress message and blocks duplicate exports', (
 });
 api.render({ ...treeBase, tree_token: 'scanning', tree_complete: false, busy: false, tree_structure: null });
 check('paused hierarchy scans can be resumed explicitly', () => {
-  assert.equal(nodes.measure.textContent, '继续读取并测量'); assert.equal(nodes.measure.disabled, false);
+  assert.equal(nodes.measure.textContent, '继续读取并批量计算'); assert.equal(nodes.measure.disabled, false);
   assert.match(nodes['tree-empty'].textContent, /暂停/);
 });
 api.render({ ...treeBase, tree_token: 'empty', tree_root_count: 0, tree_measured: 0, pending_count: 0, definition_count: 0,
@@ -231,7 +234,7 @@ const lazy = { ...treeBase, tree_token: 'lazy', tree_all_loaded: false, tree_roo
 api.render(lazy);
 check('lazy trees explain partial loading and offer explicit full reading', () => {
   assert.equal(rootRows().length, 2); assert.equal(nodes['load-all'].hidden, false);
-  assert.match(nodes['tree-detail'].textContent, /展开时读取子项.*0.03/); assert.equal(nodes.measure.textContent, '重新测量已读取项');
+  assert.match(nodes['tree-detail'].textContent, /展开时读取子项.*0.03/); assert.equal(nodes.measure.textContent, '批量重新计算');
 });
 rootRows()[0].children[0].events.click();
 check('opening an unread branch sends one scoped expansion request', () => {
@@ -261,10 +264,54 @@ check('another instance of a loaded definition shares its children without a new
   assert.equal(allRows().length, 4); assert.equal(messages.length, beforeCacheToggle);
 });
 api.render({ ...lazy, tree_complete: false, busy: true, job_kind: 'tree', tree_structure: null, tree_sizes: {} });
-check('an expansion queued during measurement does not mislabel exports as scanning', () => assert.equal(nodes['tree-status'].textContent, '正在测量'));
+check('an expansion queued during measurement does not mislabel exports as scanning', () => assert.equal(nodes['tree-status'].textContent, '正在计算'));
 api.render({ ...lazy, tree_structure: null, tree_sizes: {} });
 nodes['load-all'].events.click();
 check('full directory reading requires the explicit native callback', () => assert.equal(messages.at(-1).name, 'load_all'));
 api.render({ ...lazy, tree_all_loaded: true, tree_structure: null, tree_sizes: {} });
 check('the full-directory button disappears once every level is loaded', () => assert.equal(nodes['load-all'].hidden, true));
+
+const rowActions = { ...treeBase, tree_token: 'row-actions', tree_structure: graph };
+api.render(rowActions);
+check('each group and component row provides an individual calculation button', () => {
+  assert.ok(rootRows().every(row => row.children[4].textContent === '计算大小'));
+  assert.equal(nodes.measure.className, 'secondary-button'); assert.equal(nodes['tree-status'].textContent, '层级已就绪');
+});
+rootRows()[0].children[4].focus();
+rootRows()[0].children[4].events.click();
+check('an unmeasured row sends only its path and tree token for calculation', () => {
+  const message = messages.at(-1); assert.equal(message.name, 'measure_item');
+  assert.equal(message.args[0].path, '12'); assert.equal(message.args[0].token, 'row-actions'); assert.equal(message.args[0].force, false);
+  const beforeDoubleClick = messages.length;
+  rootRows()[0].children[4].events.click();
+  assert.equal(messages.length, beforeDoubleClick); assert.equal(rootRows()[0].children[4].textContent, '计算中…');
+});
+const rowBusy = { ...rowActions, tree_structure: null, tree_sizes: {}, busy: true, job_kind: 'tree', tree_measuring_id: '502' };
+api.render(rowBusy);
+check('all instances of the computing definition show the same busy state', () => {
+  assert.equal(rootRows()[0].children[4].textContent, '计算中…'); assert.equal(rootRows()[1].children[4].textContent, '计算中…');
+  assert.equal(rootRows()[2].children[4].textContent, '计算大小'); assert.ok(rootRows().every(row => row.children[4].disabled));
+  assert.match(nodes['tree-detail'].textContent, /所点项目/);
+});
+const beforeBusyClick = messages.length;
+rootRows()[2].children[4].events.click();
+check('clicks received during a calculation cannot create another export', () => assert.equal(messages.length, beforeBusyClick));
+api.render({ ...rowActions, tree_structure: null, tree_measured: 1, pending_count: 1, tree_sizes: { '502': { bytes: 32768 } } });
+check('completion updates every shared instance and restores its calculation button focus', () => {
+  assert.equal(rootRows()[0].children[4].textContent, '重新计算'); assert.equal(rootRows()[1].children[4].textContent, '重新计算');
+  assert.equal(rootRows()[0].children[3].textContent, '32.00 KB'); assert.equal(rootRows()[0].children[4].focused, true);
+  assert.equal(rootRows()[2].children[4].textContent, '计算大小');
+});
+rootRows()[0].children[4].events.click();
+check('the recalculation action explicitly requests a fresh result for that definition', () => {
+  assert.equal(messages.at(-1).args[0].force, true); assert.equal(messages.at(-1).args[0].path, '12');
+});
+api.render({ ...rowActions, tree_structure: null, tree_sizes: { '502': { bytes: null, error: '保存失败' } } });
+check('a failed row offers a retry without marking unrelated rows as failed', () => {
+  assert.equal(rootRows()[0].children[4].textContent, '重试'); assert.equal(rootRows()[2].children[4].textContent, '计算大小');
+});
+rootRows()[0].children[4].events.click();
+check('retrying a failed row requests only that definition', () => {
+  assert.equal(messages.at(-1).name, 'measure_item'); assert.equal(messages.at(-1).args[0].force, false);
+});
 console.log(checks + ' UI logic checks passed.');

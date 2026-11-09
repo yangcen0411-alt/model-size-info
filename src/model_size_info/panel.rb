@@ -102,7 +102,7 @@ module ModelFootprintTools
       def initialize
         @dialog = nil
         @ready = false
-        @scope = 'follow'
+        @scope = 'tree'
         @auto = Sketchup.read_default('ModelFootprintTools.SizeInfo', 'auto', true) != false
         @generation = 0
         @busy = false
@@ -268,6 +268,9 @@ module ModelFootprintTools
           schedule
         end
         @dialog.add_action_callback('measure') { |_context| measure(true) }
+        @dialog.add_action_callback('measure_item') do |_context, request|
+          measure_tree_item(request)
+        end
         @dialog.add_action_callback('refresh') { |_context| cancel; refresh(true) }
         @dialog.add_action_callback('cancel') do |_context|
           cancel
@@ -307,6 +310,8 @@ module ModelFootprintTools
         @refresh_timer = @job_timer = nil
         @busy = false
         @job_kind = nil
+        @tree_measuring_id = nil
+        @read_after_measure = false
       end
 
       def schedule
@@ -344,7 +349,7 @@ module ModelFootprintTools
             rescue StandardError => error
               if @scope == 'tree' && definition
                 @tree_errors[definition.persistent_id.to_s] = error.message
-                @error = "#{@tree_errors.length} 个定义测量失败；成功结果已保留，可点击下方按钮重试未完成项。"
+                @error = "#{@tree_errors.length} 个定义计算失败。点击对应行的“重试”按钮可再次计算。"
               else
                 @error = error.message
                 queue.clear
@@ -356,10 +361,13 @@ module ModelFootprintTools
           end
           next render unless token == @generation && active?
           if queue.empty?
+            read_after_measure = @read_after_measure
             @busy = false
             @job_kind = nil
+            @tree_measuring_id = nil
+            @read_after_measure = false
             render
-            scan_tree(false) if @scope == 'tree' && @tree_index && !@tree_index.complete?
+            scan_tree(false) if read_after_measure && @scope == 'tree' && @tree_index && !@tree_index.complete?
           else
             progress_render
             measure_next(queue, token, force)
@@ -424,12 +432,13 @@ module ModelFootprintTools
           tree_scanned: index ? index.scanned_instances : 0,
           tree_scanned_definitions: index ? index.scanned_definitions : 0,
           tree_measured: measured,
+          tree_measuring_id: @tree_measuring_id,
           tree_errors: @tree_errors.length,
           tree_sizes: sizes,
           definition_count: definitions.length,
           pending_count: definitions.length - measured,
           tree_structure: index && index.delta,
-          note: '目录按需读取，展开时加载子级；可点击“读取全部层级”查看全模型。每项为独立 SKP 大小，父级已包含子级，不能逐行相加。'
+          note: '点击行内“计算大小”计算该项的完整 SKP 体积，包含嵌套内容。相同定义共享结果。跨层相加会重复计入子级。'
         )
         data
       end
@@ -491,6 +500,35 @@ module ModelFootprintTools
         measure_next(queue, @generation, false)
       end
 
+      def measure_tree_item(request)
+        return unless active? && @scope == 'tree'
+        return if @busy
+        unless request.is_a?(Hash) && request['token'] == @tree_serial.to_s && @tree_index
+          raise '组件树已更新，请在最新列表中重新计算。'
+        end
+        entity = @tree_index.resolve(request['path']).last
+        definition = entity.definition
+        id = definition.persistent_id.to_s
+        unless definition.valid? && @tree_index.definitions_by_id[id] == definition
+          raise '组件定义已更新，请刷新后再计算。'
+        end
+        force = request['force'] == true
+        return render if @analyzer.cached(definition) && !force
+
+        cancel
+        @error = nil
+        @analyzer.invalidate_definition(definition) if force
+        @tree_errors.delete(id)
+        @busy = true
+        @job_kind = 'tree'
+        @tree_measuring_id = id
+        render
+        measure_next([definition], @generation, false)
+      rescue StandardError => error
+        cancel if @tree_measuring_id && @tree_measuring_id == id
+        show_error(error)
+      end
+
       def locate_tree_item(request)
         return unless active?
         unless request.is_a?(Hash) && request['token'] == @tree_serial.to_s && @tree_index
@@ -528,6 +566,7 @@ module ModelFootprintTools
         end
         entity = @tree_index.resolve(request['path']).last
         @tree_index.request(entity.definition.persistent_id.to_s)
+        @read_after_measure = true if @busy && @job_kind == 'tree' && !@tree_index.complete?
         @busy ? render : scan_tree(false)
       rescue StandardError => error
         show_error(error)

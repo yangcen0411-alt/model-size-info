@@ -208,4 +208,74 @@ dialog.event('ready')
 UI.drain
 check.call('an empty model completes immediately without an export job') { dialog.last_data['tree_complete'] && dialog.last_data['tree_all_loaded'] && dialog.last_data['definition_count'] == 0 && UI.timer_count == 0 }
 dialog.close
+
+# Per-row calculation must not turn a parent request into a recursive export.
+item_model = TestModel.new
+item_parent = TestDefinition.new(30_000, '父组件', 8192)
+item_child = TestDefinition.new(30_001, '子组件', 1024)
+item_other = TestDefinition.new(30_002, '独立组件', 2048)
+child_instance = Sketchup::ComponentInstance.new(item_child, '子项')
+item_parent.entities << child_instance
+parent_instance = Sketchup::Group.new(item_parent, '父项 A')
+shared_instance = Sketchup::ComponentInstance.new(item_parent, '父项 B')
+other_instance = Sketchup::ComponentInstance.new(item_other, '独立项')
+item_model.entities.concat([parent_instance, shared_instance, other_instance])
+item_model.definitions.concat([item_parent, item_child, item_other])
+item_model.selection << parent_instance
+Sketchup.active_model = item_model
+item_panel = ModelFootprintTools::SizeInfo::Panel.new
+item_panel.show
+item_dialog = item_panel.instance_variable_get(:@dialog)
+item_dialog.event('ready')
+UI.drain
+check.call('a fresh panel defaults to hierarchy reading even with a selected component') { item_dialog.last_data['scope'] == 'tree' && item_dialog.last_data['tree_measured'] == 0 && item_parent.exports == 0 && item_child.exports == 0 }
+item_token = item_dialog.last_data['tree_token']
+parent_request = { 'token' => item_token, 'path' => parent_instance.persistent_id.to_s, 'force' => false }
+item_dialog.event('locate', parent_request)
+check.call('selecting a tree item leaves every size uncomputed') { item_parent.exports == 0 && item_child.exports == 0 && item_other.exports == 0 }
+item_dialog.event('measure_item', parent_request)
+check.call('a row request exposes the definition being calculated') { item_dialog.last_data['tree_measuring_id'] == '30000' && item_dialog.last_data['busy'] }
+item_dialog.event('measure_item', parent_request)
+UI.drain
+item_analyzer = item_panel.instance_variable_get(:@analyzer)
+check.call('a parent calculation exports one full definition without reading or exporting descendants') { item_parent.exports == 1 && item_child.exports == 0 && item_other.exports == 0 && item_parent.entities.grep_calls.empty? && item_analyzer.cached_by_id('30000')[:bytes] == 8192 }
+item_dialog.event('measure_item', { 'token' => item_token, 'path' => shared_instance.persistent_id.to_s, 'force' => false })
+UI.drain
+check.call('another instance reuses the same cached size without exporting again') { item_parent.exports == 1 && item_dialog.last_data['tree_measuring_id'].nil? && !item_dialog.last_data['busy'] }
+item_dialog.event('measure_item', { 'token' => item_token, 'path' => other_instance.persistent_id.to_s, 'force' => false })
+UI.drain
+item_parent.payload_bytes = 12_288
+item_dialog.event('measure_item', parent_request.merge('force' => true))
+UI.drain
+check.call('recalculating one definition preserves other cached results') { item_parent.exports == 2 && item_other.exports == 1 && item_analyzer.cached_by_id('30000')[:bytes] == 12_288 && item_analyzer.cached_by_id('30002')[:bytes] == 2048 }
+item_parent.fail_save = true
+item_dialog.event('measure_item', parent_request.merge('force' => true))
+UI.drain
+check.call('a failed single recalculation clears only its own outdated result') { item_analyzer.cached_by_id('30000').nil? && item_analyzer.cached_by_id('30002')[:bytes] == 2048 && item_dialog.last_data['tree_errors'] == 1 && !item_dialog.last_data['busy'] }
+item_parent.fail_save = false
+item_dialog.event('measure_item', parent_request)
+UI.drain
+check.call('a row retry clears its error without recalculating unrelated definitions') { item_parent.exports == 4 && item_other.exports == 1 && item_child.exports == 0 && item_dialog.last_data['tree_errors'] == 0 && item_dialog.last_data['error'].nil? }
+
+item_dialog.event('load_all')
+item_dialog.event('cancel')
+queries_before_single = item_parent.entities.grep_calls.length
+item_dialog.event('measure_item', parent_request.merge('force' => true))
+UI.drain
+check.call('a single calculation does not resume a directory read that the user stopped') { !item_dialog.last_data['tree_complete'] && item_parent.entities.grep_calls.length == queries_before_single && UI.timer_count == 0 }
+item_dialog.event('load_all')
+UI.drain
+parent_exports_before_child = item_parent.exports
+item_dialog.event('measure_item', { 'token' => item_token, 'path' => "#{parent_instance.persistent_id}.#{child_instance.persistent_id}", 'force' => false })
+UI.drain
+check.call('a nested child can be calculated separately without exporting its parent again') { item_child.exports == 1 && item_parent.exports == parent_exports_before_child && item_analyzer.cached_by_id('30001')[:bytes] == 1024 }
+item_dialog.event('measure_item', parent_request.merge('force' => true))
+item_dialog.event('cancel')
+UI.drain
+check.call('canceling a queued row calculation preserves other definition sizes') { item_parent.exports == parent_exports_before_child && item_analyzer.cached_by_id('30001')[:bytes] == 1024 && item_dialog.last_data['tree_measuring_id'].nil? && UI.timer_count == 0 }
+item_panel.model_changed
+UI.drain
+item_dialog.event('measure_item', parent_request)
+check.call('a calculation request from a stale tree is rejected after an edit') { item_dialog.last_data['error'].include?('组件树已更新') && item_parent.exports == parent_exports_before_child }
+item_dialog.close
 puts "#{passed.length} tree checks passed."

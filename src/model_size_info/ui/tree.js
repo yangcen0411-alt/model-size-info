@@ -15,6 +15,8 @@
       var selected = null;
       var busy = false;
       var jobKind = null;
+      var measuringId = null;
+      var calculationFocusPath = null;
       var sort = 'size';
       var pageSize = 100;
       var collator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
@@ -41,8 +43,20 @@
       function labelSize(element, id) {
         var measurement = sizes[id] || {};
         element.className = 'tree-size' + (measurement.error ? ' failed' : (measurement.bytes == null ? ' pending' : ''));
-        element.textContent = measurement.error ? '失败' : (measurement.bytes == null ? '待测量' : options.sizeText(measurement.bytes));
-        element.title = measurement.error || (measurement.bytes == null ? '点击下方按钮测量' : measurement.bytes.toLocaleString('zh-CN') + ' 字节');
+        element.textContent = measurement.error ? '失败' : (measurement.bytes == null ? '未计算' : options.sizeText(measurement.bytes));
+        element.title = measurement.error || (measurement.bytes == null ? '点击此行的“计算大小”按钮' : measurement.bytes.toLocaleString('zh-CN') + ' 字节');
+      }
+
+      function updateMeasurement(entry) {
+        var measurement = sizes[entry.id] || {};
+        var calculating = busy && measuringId === entry.id;
+        var label = calculating ? '计算中…' : (measurement.error ? '重试' : (measurement.bytes == null ? '计算大小' : '重新计算'));
+        labelSize(entry.size, entry.id);
+        entry.action.textContent = label;
+        entry.action.disabled = busy;
+        entry.action.className = 'tree-measure' + (calculating ? ' calculating' : '');
+        entry.action.setAttribute('aria-label', label + ' ' + entry.label);
+        entry.action.title = '计算“' + entry.label + '”的完整文件大小，包含嵌套内容。';
       }
 
       function ordered(nodes) {
@@ -79,7 +93,7 @@
           var opened = canOpen && !!expanded[path];
           var item = document.createElement('li');
           var row = document.createElement('div'); row.className = 'tree-row';
-          row.style.paddingLeft = (8 + Math.min(depth, 9) * 15) + 'px';
+          row.style.paddingLeft = (8 + Math.min(depth, 6) * 12) + 'px';
           row.classList.toggle('located', selected === path);
           var toggle = document.createElement('button'); toggle.className = 'tree-toggle';
           toggle.textContent = canOpen ? (opened ? '▾' : '▸') : '·';
@@ -93,7 +107,7 @@
           var badge = document.createElement('span'); badge.className = 'tree-badge' + (node.kind === '群组' ? ' group' : '');
           badge.textContent = node.kind === '群组' ? '组' : '件'; badge.setAttribute('aria-hidden', 'true');
           var name = document.createElement('button'); name.className = 'tree-name';
-          name.title = nameOf(node) + '；点击选择并缩放到此对象，嵌套对象会打开父级编辑环境';
+          name.title = nameOf(node) + '。点击选择并缩放到此对象，嵌套对象会打开父级编辑环境。';
           var title = document.createElement('span'); title.className = 'tree-name-title'; title.textContent = nameOf(node);
           var meta = document.createElement('span'); meta.className = 'tree-meta';
           meta.textContent = node.kind + (children.length ? ' · ' + children.length + ' 个子项' : '') +
@@ -101,17 +115,31 @@
             (node.hidden ? ' · 隐藏' : '') + (node.locked ? ' · 锁定' : '') + (cycle ? ' · 循环引用' : '');
           name.appendChild(title); name.appendChild(meta);
           name.addEventListener('click', function () { selectRow(path); });
-          var size = document.createElement('span'); labelSize(size, node.definition_id);
-          row.appendChild(toggle); row.appendChild(badge); row.appendChild(name); row.appendChild(size);
+          var size = document.createElement('span');
+          var action = document.createElement('button'); action.type = 'button';
+          action.addEventListener('click', function () {
+            if (busy) return;
+            var measurement = sizes[node.definition_id] || {};
+            busy = true;
+            jobKind = 'tree';
+            measuringId = node.definition_id;
+            calculationFocusPath = path;
+            visible.forEach(updateMeasurement);
+            options.send('measure_item', { token: token, path: path, force: measurement.bytes != null });
+          });
+          row.appendChild(toggle); row.appendChild(badge); row.appendChild(name); row.appendChild(size); row.appendChild(action);
           item.appendChild(row); parent.appendChild(item);
-          visible.push({ path: path, id: node.definition_id, size: size, row: row, toggle: toggle, name: name });
+          var visibleEntry = { path: path, id: node.definition_id, size: size, row: row,
+            toggle: toggle, name: name, action: action, label: nameOf(node) };
+          visible.push(visibleEntry);
+          updateMeasurement(visibleEntry);
           if (opened) {
             var nested = document.createElement('ul'); nested.className = 'tree-children';
             item.appendChild(nested);
             if (isLoaded) renderLevel(nested, children, path, ancestors.concat(node.definition_id), depth + 1);
             else {
               var placeholder = document.createElement('li'); placeholder.className = 'tree-placeholder';
-              placeholder.textContent = busy ? (jobKind === 'tree' ? '等待测量结束后读取…' : '正在读取此层级…') : '等待读取；收起后展开可继续。';
+              placeholder.textContent = busy ? (jobKind === 'tree' ? '等待测量结束后读取…' : '正在读取此层级…') : '等待读取。收起后展开可继续。';
               nested.appendChild(placeholder);
             }
           }
@@ -128,8 +156,10 @@
       function draw(focusPath, focusToggle) {
         var scroll = list.scrollTop;
         if (!focusPath) visible.some(function (entry) {
-          if (document.activeElement === entry.toggle || document.activeElement === entry.name) {
-            focusPath = entry.path; focusToggle = document.activeElement === entry.toggle; return true;
+          if (document.activeElement === entry.toggle || document.activeElement === entry.name || document.activeElement === entry.action) {
+            focusPath = entry.path;
+            focusToggle = document.activeElement === entry.toggle ? 'toggle' : (document.activeElement === entry.action ? 'action' : null);
+            return true;
           }
           return false;
         });
@@ -138,7 +168,10 @@
         list.scrollTop = scroll;
         if (focusPath) visible.some(function (entry) {
           if (entry.path !== focusPath) return false;
-          (focusToggle && !entry.toggle.disabled ? entry.toggle : entry.name).focus(); return true;
+          var target = entry.name;
+          if (focusToggle === 'action' && !entry.action.disabled) target = entry.action;
+          else if (focusToggle && focusToggle !== 'action' && !entry.toggle.disabled) target = entry.toggle;
+          target.focus(); return true;
         });
       }
 
@@ -149,7 +182,7 @@
         var changed = token !== data.tree_token;
         if (changed) {
           token = data.tree_token; graph = null; expanded = Object.create(null);
-          limits = Object.create(null); selected = null; sizes = {};
+          limits = Object.create(null); selected = null; sizes = {}; calculationFocusPath = null;
         }
         Object.keys(data.tree_sizes || {}).forEach(function (id) { sizes[id] = data.tree_sizes[id]; });
         if (data.tree_structure) {
@@ -159,9 +192,10 @@
           changed = true;
         }
         var finished = busy && !data.busy;
-        busy = data.busy; jobKind = data.job_kind;
-        if (changed || finished) draw();
-        else visible.forEach(function (entry) { labelSize(entry.size, entry.id); });
+        busy = data.busy; jobKind = data.job_kind; measuringId = data.tree_measuring_id || null;
+        if (changed || finished) draw(finished ? calculationFocusPath : null, 'action');
+        else visible.forEach(updateMeasurement);
+        if (finished) calculationFocusPath = null;
         $('tree-empty').hidden = !!(graph && graph.roots.length);
         $('tree-empty').textContent = data.tree_complete ? '模型中没有群组或组件。' :
           (data.busy ? '正在读取模型层级…' : '扫描已暂停，点击下方按钮继续。');
