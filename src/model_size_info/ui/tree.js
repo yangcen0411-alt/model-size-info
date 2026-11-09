@@ -40,23 +40,19 @@
         while (element.firstChild) element.removeChild(element.firstChild);
       }
 
-      function labelSize(element, id) {
-        var measurement = sizes[id] || {};
-        element.className = 'tree-size' + (measurement.error ? ' failed' : (measurement.bytes == null ? ' pending' : ''));
-        element.textContent = measurement.error ? '失败' : (measurement.bytes == null ? '未计算' : options.sizeText(measurement.bytes));
-        element.title = measurement.error || (measurement.bytes == null ? '点击此行的“计算大小”按钮' : measurement.bytes.toLocaleString('zh-CN') + ' 字节');
-      }
-
       function updateMeasurement(entry) {
         var measurement = sizes[entry.id] || {};
         var calculating = busy && measuringId === entry.id;
+        var measured = !measurement.error && measurement.bytes != null;
         var label = calculating ? '计算中…' : (measurement.error ? '重试' : (measurement.bytes == null ? '计算大小' : '重新计算'));
-        labelSize(entry.size, entry.id);
-        entry.action.textContent = label;
+        entry.size.className = 'tree-size' + (measurement.error ? ' failed' : (!measured ? ' pending' : ''));
+        entry.size.textContent = measured && !calculating ? options.sizeText(measurement.bytes) : label;
+        entry.size.title = measurement.error || (measured ? measurement.bytes.toLocaleString('zh-CN') + ' 字节' : '');
         entry.action.disabled = busy;
-        entry.action.className = 'tree-measure' + (calculating ? ' calculating' : '');
+        entry.action.className = 'tree-measure' + (calculating ? ' calculating' : (measured ? ' measured' : ''));
         entry.action.setAttribute('aria-label', label + ' ' + entry.label);
-        entry.action.title = '计算“' + entry.label + '”的完整文件大小，包含嵌套内容。';
+        entry.action.title = measurement.error ? measurement.error + '。点击重试。' :
+          (measured ? '点击重新计算“' + entry.label + '”的大小。' : '计算“' + entry.label + '”的文件大小，包含子级。');
       }
 
       function ordered(nodes) {
@@ -107,12 +103,13 @@
           var badge = document.createElement('span'); badge.className = 'tree-badge' + (node.kind === '群组' ? ' group' : '');
           badge.textContent = node.kind === '群组' ? '组' : '件'; badge.setAttribute('aria-hidden', 'true');
           var name = document.createElement('button'); name.className = 'tree-name';
-          name.title = nameOf(node) + '。点击选择并缩放到此对象，嵌套对象会打开父级编辑环境。';
           var title = document.createElement('span'); title.className = 'tree-name-title'; title.textContent = nameOf(node);
           var meta = document.createElement('span'); meta.className = 'tree-meta';
           meta.textContent = node.kind + (children.length ? ' · ' + children.length + ' 个子项' : '') +
             (!isLoaded && !cycle ? ' · 展开读取' : '') +
             (node.hidden ? ' · 隐藏' : '') + (node.locked ? ' · 锁定' : '') + (cycle ? ' · 循环引用' : '');
+          meta.setAttribute('aria-hidden', 'true');
+          name.title = nameOf(node) + ' · ' + meta.textContent + '。点击定位，嵌套对象会打开父级编辑环境。';
           name.appendChild(title); name.appendChild(meta);
           name.addEventListener('click', function () { selectRow(path); });
           var size = document.createElement('span');
@@ -127,7 +124,8 @@
             visible.forEach(updateMeasurement);
             options.send('measure_item', { token: token, path: path, force: measurement.bytes != null });
           });
-          row.appendChild(toggle); row.appendChild(badge); row.appendChild(name); row.appendChild(size); row.appendChild(action);
+          action.appendChild(size);
+          row.appendChild(toggle); row.appendChild(badge); row.appendChild(name); row.appendChild(action);
           item.appendChild(row); parent.appendChild(item);
           var visibleEntry = { path: path, id: node.definition_id, size: size, row: row,
             toggle: toggle, name: name, action: action, label: nameOf(node) };
@@ -198,7 +196,7 @@
         if (finished) calculationFocusPath = null;
         $('tree-empty').hidden = !!(graph && graph.roots.length);
         $('tree-empty').textContent = data.tree_complete ? '模型中没有群组或组件。' :
-          (data.busy ? '正在读取模型层级…' : '扫描已暂停，点击下方按钮继续。');
+          (data.busy ? '正在读取模型层级…' : '读取已暂停，可在“更多”中继续。');
         $('tree-collapse').disabled = !graph || !graph.roots.length;
         // Keep a stable sibling order during exports; apply the chosen order once
         // the queue finishes, so rows and expanded branches do not jump around.

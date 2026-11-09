@@ -49,10 +49,11 @@
     current = data;
     var model = data.kind === 'model';
     var isTree = data.kind === 'tree';
+    document.body.classList.toggle('tree-mode', isTree);
     setHidden('primary', isTree); setHidden('properties', isTree); setHidden('tree-view', !isTree);
-    setHidden('auto-option', isTree);
+    setHidden('primary-actions', isTree); setHidden('tree-options', !isTree); setHidden('scope-tree', isTree);
+    setHidden('auto-option', isTree || data.scope === 'model');
     setHidden('load-all', !isTree || !!data.tree_all_loaded);
-    $('measure').className = isTree ? 'secondary-button' : 'primary-button';
     var parts = formatBytes(data.bytes);
     setText('kind', data.subtitle);
     setText('object-name', data.title); $('object-name').title = data.title;
@@ -82,11 +83,13 @@
     setText('note', data.note);
     setText('error', data.error || ''); setHidden('error', !data.error);
     setHidden('progress', !data.busy); setHidden('cancel', !data.busy);
+    setHidden('running-actions', !data.busy);
     setText('measure', model ? '测量当前模型' : (data.bytes === null ? '测量选中定义' : '重新测量'));
     $('measure').disabled = data.busy || (!model && !data.rows.length);
+    setText('measure-current', $('measure').textContent);
+    $('measure-current').disabled = $('measure').disabled;
     if (isTree) {
       tree.render(data);
-      setText('tree-model-name', data.title); $('tree-model-name').title = data.title;
       setText('tree-root-count', count(data.tree_root_count));
       setText('tree-definition-count', count(data.definition_count));
       setText('tree-measured-count', count(data.tree_measured));
@@ -122,14 +125,27 @@
     $('status').className = 'status ' + (data.error ? 'error' : (data.busy ? 'busy' : (data.bytes !== null ? 'ready' : '')));
   }
 
-  $('scope-follow').addEventListener('click', function () { send('scope', 'follow'); });
-  $('scope-model').addEventListener('click', function () { send('scope', 'model'); });
-  $('scope-tree').addEventListener('click', function () { send('scope', 'tree'); });
+  function closeMenu(restoreFocus) {
+    $('more').open = false;
+    if (restoreFocus) $('more-toggle').focus();
+  }
+
+  ['follow', 'model', 'tree'].forEach(function (scope) {
+    $('scope-' + scope).addEventListener('click', function () { closeMenu(true); send('scope', scope); });
+  });
   $('auto').addEventListener('change', function () { send('auto', this.checked); });
-  $('measure').addEventListener('click', function () { send('measure'); });
+  $('measure').addEventListener('click', function () { closeMenu(true); send('measure'); });
+  $('measure-current').addEventListener('click', function () { send('measure'); });
   $('cancel').addEventListener('click', function () { send('cancel'); });
   $('refresh').addEventListener('click', function () { send('refresh'); });
-  $('load-all').addEventListener('click', function () { send('load_all'); });
+  $('load-all').addEventListener('click', function () { closeMenu(true); send('load_all'); });
+  $('tree-collapse').addEventListener('click', function () { closeMenu(true); });
+  document.addEventListener('click', function (event) {
+    if ($('more').open && !$('more').contains(event.target)) closeMenu(false);
+  });
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && $('more').open) { closeMenu(true); event.preventDefault(); }
+  });
 
   window.ModelSizeInfo = { render: render, formatBytes: formatBytes, getState: function () { return current; } };
   document.addEventListener('DOMContentLoaded', function () {
@@ -140,6 +156,7 @@
       setText('tree-status', '未连接 SketchUp');
       setText('tree-empty', '请从 SketchUp 的扩展菜单打开此面板。');
       $('measure').disabled = true;
+      $('measure-current').disabled = true;
       $('load-all').disabled = true;
     }
   });

@@ -175,7 +175,7 @@ end
 
 module ModelFootprintTools
   module SizeInfo
-    VERSION = '1.3.1'
+    VERSION = '1.4.0'
   end
 end
 require_relative '../src/model_size_info/analyzer'

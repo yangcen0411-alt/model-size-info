@@ -127,10 +127,10 @@ module ModelFootprintTools
           preferences_key: 'ModelFootprintTools.SizeInfo.Panel',
           scrollable: true,
           resizable: true,
-          width: 440,
-          height: 740,
+          width: 380,
+          height: 560,
           min_width: 320,
-          min_height: 440,
+          min_height: 360,
           style: UI::HtmlDialog::STYLE_UTILITY
         )
         @ready = false

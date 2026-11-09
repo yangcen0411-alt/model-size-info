@@ -15,13 +15,16 @@ class Element {
   constructor(tag = 'div') {
     this.tagName = tag; this.children = []; this.events = {}; this.attributes = {}; this.textContent = ''; this.className = '';
     this.style = {};
+    Object.defineProperty(this, 'textContent', { get: () => this._textContent + this.children.map(child => child.textContent).join(''), set: value => { this._textContent = String(value); this.children = []; } });
+    this._textContent = '';
     this.classList = { toggle: (name, active) => { this.attributes['class:' + name] = active; } };
     Object.defineProperty(this, 'innerHTML', { set() { throw new Error('HTML injection sink used'); } });
   }
   get firstChild() { return this.children[0] || null; }
   appendChild(child) { this.children.push(child); }
   removeChild(child) { this.children.splice(this.children.indexOf(child), 1); }
-  addEventListener(event, callback) { this.events[event] = callback; }
+  addEventListener(event, callback) { const previous = this.events[event]; this.events[event] = previous ? function (...args) { previous.apply(this, args); callback.apply(this, args); } : callback; }
+  contains(target) { return this === target || this.children.some(child => child.contains(target)); }
   setAttribute(name, value) { this.attributes[name] = value; }
   focus() { this.focused = true; if (this.ownerDocument) this.ownerDocument.activeElement = this; }
 }
@@ -33,6 +36,7 @@ function mount(connected = true) {
   const bridge = {};
   for (const name of ['ready', 'scope', 'auto', 'measure', 'measure_item', 'refresh', 'cancel', 'locate', 'expand', 'load_all']) bridge[name] = (...args) => messages.push({ name, args });
   const document = {
+    body: new Element('body'),
     getElementById(id) { assert.ok(nodes[id], 'Missing HTML element ' + id); return nodes[id]; },
     createElement(tag) { const element = new Element(tag); element.ownerDocument = document; return element; },
     addEventListener(event, callback) { events[event] = callback; }
@@ -43,7 +47,7 @@ function mount(connected = true) {
   vm.runInContext(treeSource, context);
   vm.runInContext(source, context);
   events.DOMContentLoaded();
-  return { nodes, messages, api: window.ModelSizeInfo };
+  return { nodes, messages, events, document, api: window.ModelSizeInfo };
 }
 
 let checks = 0;
@@ -59,7 +63,7 @@ const base = {
   measurement_state: 'ready', measured_at: null, selected_count: 1, definition_count: 1, direct_entities: 102,
   instance_count: 8, loose_count: 0, pending_count: 0, rows: [{ id: '1', name: '家具组件', kind: '组件', selected_instances: 1, bytes: 1048576 }],
   file: { name: '模型.skp', bytes: 2097152, saved: true, modified: false }, note: '组件定义的独立文件体积。',
-  scope: 'follow', auto: true, auto_limit: 3, busy: false, error: null, version: '1.3.1'
+  scope: 'follow', auto: true, auto_limit: 3, busy: false, error: null, version: '1.4.0'
 };
 api.render(base);
 check('selection renders size and properties', () => { assert.equal(nodes['size-value'].textContent, '1.00'); assert.equal(nodes['size-unit'].textContent, 'MB'); assert.equal(nodes['instance-count'].textContent, '8'); });
@@ -126,13 +130,13 @@ check('tree mode replaces the single-size panel and keeps range state accessible
   assert.equal(nodes['tree-view'].hidden, false); assert.equal(nodes['auto-option'].hidden, true);
   assert.equal(nodes['scope-tree'].attributes['aria-pressed'], 'true'); assert.equal(nodes.breakdown.hidden, true);
 });
-check('tree header counts roots and unique definitions without an aggregate file total', () => {
+check('tree statistics remain available without an aggregate file total', () => {
   assert.equal(nodes['tree-root-count'].textContent, '3'); assert.equal(nodes['tree-definition-count'].textContent, '2');
   assert.equal(nodes['tree-measured-count'].textContent, '0'); assert.equal(nodes.measure.textContent, '批量计算已读取项');
 });
 check('tree initially draws only roots and uses a stable name tie-breaker', () => {
   assert.equal(allRows().length, 3); assert.equal(rootRows()[0].children[2].children[0].textContent, 'A 餐桌');
-  assert.equal(rootRows()[0].children[3].textContent, '未计算');
+  assert.equal(rootRows()[0].children[3].children[0].textContent, '计算大小');
 });
 rootRows()[0].children[0].events.click();
 check('expanding a branch lazily draws its nested children', () => {
@@ -151,8 +155,8 @@ const originalRow = rootRows()[0];
 api.render(partialTree);
 check('progress updates patch sizes without destroying expanded rows or focus', () => {
   assert.equal(rootRows()[0], originalRow); assert.equal(allRows().length, 4);
-  assert.equal(rootRows()[0].children[3].textContent, '32.00 KB');
-  assert.equal(rootRows()[1].children[3].textContent, '32.00 KB');
+  assert.equal(rootRows()[0].children[3].children[0].textContent, '32.00 KB');
+  assert.equal(rootRows()[1].children[3].children[0].textContent, '32.00 KB');
   assert.equal(nodes.measure.disabled, true); assert.equal(nodes['tree-sort'].disabled, true);
 });
 api.render({ ...partialTree, busy: false });
@@ -179,11 +183,11 @@ check('collapse all keeps roots and removes only expanded children', () => asser
 api.render({ ...measuredTree, busy: false, error: '1 个定义测量失败', tree_errors: 1,
   tree_sizes: { '502': { bytes: null, error: '没有足够空间' }, '501': { bytes: 65536 } } });
 check('definition failures display a specific tooltip and keep successful values', () => {
-  assert.equal(rootRows()[0].children[3].textContent, '失败'); assert.equal(rootRows()[0].children[3].title, '没有足够空间');
-  assert.equal(rootRows()[2].children[3].textContent, '64.00 KB'); assert.equal(nodes['tree-status'].textContent, '计算失败');
+  assert.equal(rootRows()[0].children[3].children[0].textContent, '重试'); assert.equal(rootRows()[0].children[3].children[0].title, '没有足够空间');
+  assert.equal(rootRows()[2].children[3].children[0].textContent, '64.00 KB'); assert.equal(nodes['tree-status'].textContent, '计算失败');
 });
 nodes['scope-tree'].events.click();
-check('tree tab calls the native scope callback', () => assert.equal(messages.at(-1).args[0], 'tree'));
+check('return to list calls the native scope callback', () => assert.equal(messages.at(-1).args[0], 'tree'));
 
 const many = Array.from({ length: 205 }, (_, i) => ({ id: String(1000 + i), definition_id: '501', name: '对象 ' + i, kind: '组件' }));
 api.render({ ...treeBase, tree_token: 'tree-many', tree_root_count: 205, tree_structure: { roots: many, definitions: graph.definitions } });
@@ -244,7 +248,7 @@ check('opening an unread branch sends one scoped expansion request', () => {
 api.render({ ...lazy, busy: true, job_kind: 'scan', tree_complete: false,
   tree_sizes: {}, tree_structure: { roots: null, definitions: { '502': { name: '餐桌', loaded: false, loading: true, children: null } } } });
 check('reading a branch keeps existing roots, cached sizes, expansion and focus', () => {
-  assert.equal(rootRows().length, 2); assert.equal(rootRows()[0].children[3].textContent, '32.00 KB');
+  assert.equal(rootRows().length, 2); assert.equal(rootRows()[0].children[3].children[0].textContent, '32.00 KB');
   assert.equal(rootRows()[0].children[0].attributes['aria-expanded'], 'true'); assert.equal(rootRows()[0].children[0].focused, true);
 });
 api.render({ ...lazy, pending_count: 1, definition_count: 2, tree_sizes: { '501': { bytes: null } },
@@ -254,7 +258,7 @@ api.render({ ...lazy, pending_count: 1, definition_count: 2, tree_sizes: { '501'
   } } });
 check('a structure delta reveals only the requested child level', () => {
   assert.equal(allRows().length, 3); assert.equal(allRows()[1].children[2].children[0].textContent, malicious);
-  assert.equal(rootRows()[0].children[3].textContent, '32.00 KB');
+  assert.equal(rootRows()[0].children[3].children[0].textContent, '32.00 KB');
 });
 const beforeCacheToggle = messages.length;
 rootRows()[0].children[0].events.click(); rootRows()[0].children[0].events.click();
@@ -274,44 +278,76 @@ check('the full-directory button disappears once every level is loaded', () => a
 const rowActions = { ...treeBase, tree_token: 'row-actions', tree_structure: graph };
 api.render(rowActions);
 check('each group and component row provides an individual calculation button', () => {
-  assert.ok(rootRows().every(row => row.children[4].textContent === '计算大小'));
-  assert.equal(nodes.measure.className, 'secondary-button'); assert.equal(nodes['tree-status'].textContent, '层级已就绪');
+  assert.ok(rootRows().every(row => row.children[3].children[0].textContent === '计算大小'));
+  assert.equal(nodes['tree-status'].textContent, '层级已就绪');
 });
-rootRows()[0].children[4].focus();
-rootRows()[0].children[4].events.click();
+rootRows()[0].children[3].focus();
+rootRows()[0].children[3].events.click();
 check('an unmeasured row sends only its path and tree token for calculation', () => {
   const message = messages.at(-1); assert.equal(message.name, 'measure_item');
   assert.equal(message.args[0].path, '12'); assert.equal(message.args[0].token, 'row-actions'); assert.equal(message.args[0].force, false);
   const beforeDoubleClick = messages.length;
-  rootRows()[0].children[4].events.click();
-  assert.equal(messages.length, beforeDoubleClick); assert.equal(rootRows()[0].children[4].textContent, '计算中…');
+  rootRows()[0].children[3].events.click();
+  assert.equal(messages.length, beforeDoubleClick); assert.equal(rootRows()[0].children[3].children[0].textContent, '计算中…');
 });
 const rowBusy = { ...rowActions, tree_structure: null, tree_sizes: {}, busy: true, job_kind: 'tree', tree_measuring_id: '502' };
 api.render(rowBusy);
 check('all instances of the computing definition show the same busy state', () => {
-  assert.equal(rootRows()[0].children[4].textContent, '计算中…'); assert.equal(rootRows()[1].children[4].textContent, '计算中…');
-  assert.equal(rootRows()[2].children[4].textContent, '计算大小'); assert.ok(rootRows().every(row => row.children[4].disabled));
+  assert.equal(rootRows()[0].children[3].children[0].textContent, '计算中…'); assert.equal(rootRows()[1].children[3].children[0].textContent, '计算中…');
+  assert.equal(rootRows()[2].children[3].children[0].textContent, '计算大小'); assert.ok(rootRows().every(row => row.children[3].disabled));
   assert.match(nodes['tree-detail'].textContent, /所点项目/);
 });
 const beforeBusyClick = messages.length;
-rootRows()[2].children[4].events.click();
+rootRows()[2].children[3].events.click();
 check('clicks received during a calculation cannot create another export', () => assert.equal(messages.length, beforeBusyClick));
 api.render({ ...rowActions, tree_structure: null, tree_measured: 1, pending_count: 1, tree_sizes: { '502': { bytes: 32768 } } });
 check('completion updates every shared instance and restores its calculation button focus', () => {
-  assert.equal(rootRows()[0].children[4].textContent, '重新计算'); assert.equal(rootRows()[1].children[4].textContent, '重新计算');
-  assert.equal(rootRows()[0].children[3].textContent, '32.00 KB'); assert.equal(rootRows()[0].children[4].focused, true);
-  assert.equal(rootRows()[2].children[4].textContent, '计算大小');
+  assert.equal(rootRows()[0].children[3].children[0].textContent, '32.00 KB'); assert.equal(rootRows()[1].children[3].children[0].textContent, '32.00 KB');
+  assert.equal(rootRows()[0].children[3].children[0].textContent, '32.00 KB'); assert.equal(rootRows()[0].children[3].focused, true);
+  assert.equal(rootRows()[2].children[3].children[0].textContent, '计算大小');
 });
-rootRows()[0].children[4].events.click();
+rootRows()[0].children[3].events.click();
 check('the recalculation action explicitly requests a fresh result for that definition', () => {
   assert.equal(messages.at(-1).args[0].force, true); assert.equal(messages.at(-1).args[0].path, '12');
 });
 api.render({ ...rowActions, tree_structure: null, tree_sizes: { '502': { bytes: null, error: '保存失败' } } });
 check('a failed row offers a retry without marking unrelated rows as failed', () => {
-  assert.equal(rootRows()[0].children[4].textContent, '重试'); assert.equal(rootRows()[2].children[4].textContent, '计算大小');
+  assert.equal(rootRows()[0].children[3].children[0].textContent, '重试'); assert.equal(rootRows()[2].children[3].children[0].textContent, '计算大小');
 });
-rootRows()[0].children[4].events.click();
+rootRows()[0].children[3].events.click();
 check('retrying a failed row requests only that definition', () => {
   assert.equal(messages.at(-1).name, 'measure_item'); assert.equal(messages.at(-1).args[0].force, false);
 });
+api.render(rowActions);
+check('list mode hides the back button and individual inspector controls', () => {
+  assert.equal(nodes['scope-tree'].hidden, true); assert.equal(nodes['primary-actions'].hidden, true);
+  assert.equal(nodes['tree-options'].hidden, false); assert.equal(app.document.body.attributes['class:tree-mode'], true);
+  assert.ok(rootRows().every(row => row.children.length === 4));
+});
+nodes.more.open = true; nodes['scope-follow'].events.click();
+check('choosing an inspector closes More and preserves the scope callback', () => {
+  assert.equal(nodes.more.open, false); assert.equal(nodes['more-toggle'].focused, true);
+  assert.equal(messages.at(-1).args[0], 'follow');
+});
+api.render(base);
+check('the selection inspector has a visible calculation action and a return path', () => {
+  assert.equal(nodes['primary-actions'].hidden, false); assert.equal(nodes['scope-tree'].hidden, false);
+  assert.equal(nodes['tree-options'].hidden, true); assert.equal(nodes['measure-current'].disabled, false);
+});
+nodes['measure-current'].events.click();
+check('the inspector calculation action uses the existing native operation', () => assert.equal(messages.at(-1).name, 'measure'));
+api.render({ ...base, kind: 'model', scope: 'model', busy: true });
+check('model mode hides automatic selection controls and blocks duplicate calculation', () => {
+  assert.equal(nodes['auto-option'].hidden, true); assert.equal(nodes['measure-current'].disabled, true);
+  assert.equal(nodes['running-actions'].hidden, false);
+});
+let prevented = false;
+nodes.more.open = true; app.events.keydown({ key: 'Escape', preventDefault() { prevented = true; } });
+check('Escape closes More and restores focus', () => {
+  assert.equal(nodes.more.open, false); assert.equal(nodes['more-toggle'].focused, true); assert.equal(prevented, true);
+});
+nodes.more.open = true; app.events.click({ target: nodes.more });
+check('clicks within More keep it open', () => assert.equal(nodes.more.open, true));
+app.events.click({ target: new Element() });
+check('clicks outside More close it', () => assert.equal(nodes.more.open, false));
 console.log(checks + ' UI logic checks passed.');
