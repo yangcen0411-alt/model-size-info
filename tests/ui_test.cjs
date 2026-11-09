@@ -59,7 +59,7 @@ const base = {
   measurement_state: 'ready', measured_at: null, selected_count: 1, definition_count: 1, direct_entities: 102,
   instance_count: 8, loose_count: 0, pending_count: 0, rows: [{ id: '1', name: '家具组件', kind: '组件', selected_instances: 1, bytes: 1048576 }],
   file: { name: '模型.skp', bytes: 2097152, saved: true, modified: false }, note: '组件定义的独立文件体积。',
-  scope: 'follow', auto: true, auto_limit: 3, busy: false, error: null, version: '1.3.0'
+  scope: 'follow', auto: true, auto_limit: 3, busy: false, error: null, version: '1.3.1'
 };
 api.render(base);
 check('selection renders size and properties', () => { assert.equal(nodes['size-value'].textContent, '1.00'); assert.equal(nodes['size-unit'].textContent, 'MB'); assert.equal(nodes['instance-count'].textContent, '8'); });

@@ -1,25 +1,27 @@
 # 模型占用信息 · SketchUp 插件
 
-版本：1.3.0（开发版）
+版本：1.3.1（开发版）
 
-[下载插件安装包（RBZ）](https://github.com/yangcen0411-alt/model-size-info/raw/refs/heads/main/downloads/model_size_info_v1.3.0.rbz) · [下载源码包](https://github.com/yangcen0411-alt/model-size-info/raw/refs/heads/main/downloads/model_size_info_v1.3.0_source.zip)
+[下载插件安装包（RBZ）](https://github.com/yangcen0411-alt/model-size-info/raw/refs/heads/main/downloads/model_size_info_v1.3.1.rbz) · [下载源码包](https://github.com/yangcen0411-alt/model-size-info/raw/refs/heads/main/downloads/model_size_info_v1.3.1_source.zip)
 
 这是一个类似“图元信息”的独立浮动面板，默认打开组件树。先浏览群组和组件层级，点击所需行的“计算大小”后，显示该定义独立保存为 SKP 的实际字节数，并换算为 KB、MB。切换“跟随选择”可查看选中对象，切换“整个模型”可查看上次保存的文件大小或测量当前模型副本。
 
 **1.3.0 增加行内“计算大小”按钮**。父项和子项均可单独计算。父级结果包含嵌套内容，同一定义的多个实例共享结果。已计算项目提供“重新计算”，单项重新计算只更新该定义的缓存。下方的批量计算作为可选操作。
 
+**1.3.1 增加独立工具栏按钮**。工具栏名为“模型占用信息”，点击绿色立方体图标即可打开面板。首次安装自动显示，以后恢复上次的位置和显隐状态。
+
 ## 安装和打开
 
 适用于 SketchUp 2022 及更新的桌面版；不适用于网页版。采用这些版本公开的 Ruby API 开发，尚未完成 SketchUp 界面内的实际验证。
 
-1. 下载 `model_size_info_v1.3.0.rbz`，保留 `.rbz` 后缀，无需解压。
+1. 下载 `model_size_info_v1.3.1.rbz`，保留 `.rbz` 后缀，无需解压。
 2. 在 SketchUp 中打开 **扩展程序管理器**，点击 **安装扩展程序**，选择这个文件。不同版本可能将管理器放在“窗口”或“扩展程序”菜单中。
-3. 打开 **扩展程序 → 模型占用信息**。也可以在建模区域右键菜单中打开“模型占用信息”。
+3. 点击独立工具栏中的绿色立方体按钮打开面板，也可使用 **扩展程序 → 模型占用信息** 或建模区域右键菜单。Windows 中可在 **视图 → 工具栏** 勾选 **模型占用信息** 显示工具栏。
 4. 在默认的组件树中展开目录，点击所需行的 **计算大小**。
 
 这是未经过 Extension Warehouse 签名的开发版。如果 SketchUp 要求批准该扩展，请在管理器中手动批准此插件。无需更改全部扩展的加载策略。
 
-从旧版升级时，安装新版 RBZ 后重新启动 SketchUp。扩展管理器中的名称为“模型占用信息”，面板右下角版本应为 **v1.3.0**。
+从旧版升级时，安装新版 RBZ 后重新启动 SketchUp。扩展管理器中的名称为“模型占用信息”，面板右下角版本应为 **v1.3.1**。
 
 ## 如何使用
 
@@ -84,6 +86,8 @@
 
 已使用 SketchUp 2026 随附的 Ruby 3.2.2 通过源码语法检查和 106 项隔离逻辑检查，并使用 Node 通过 59 项面板检查。独立浏览器回放了 Ruby 面板实际生成的消息，验证行内计算、共享结果、焦点恢复、440 / 320 像素布局及 12 层嵌套。SketchUp 内真实模型的导出和速度尚待实测。详见 [验证记录](TEST_RESULTS.md)。
 
+工具栏另通过 10 项隔离检查，覆盖命令注册、按钮回调、重复加载、位置/显隐恢复及 Windows SVG、macOS PDF 图标路径。图标已做 SVG 解析和单页 PDF 渲染检查，工具栏在 SketchUp 宿主中的显示尚待实测。
+
 性能回归场景在一个根群组内放置 3700 个不同定义，禁止枚举全局定义列表及调用 `definition.instances`：首次仅读取根级，展开后也不进入这 3700 个子定义。另检查宽层级停止/恢复、批量测量、去重、失败重试、增量传输、缓存复用、页面重新加载及对象路径校验。
 
 ## 源码结构
@@ -109,10 +113,14 @@ tests/
 
 使用可用的 Ruby 2.7+ 执行 `ruby tests/tree_test.rb`（42 项原有检查和 64 项组件树检查），使用 Node 执行 `node tests/ui_test.cjs`。插件不依赖第三方 Ruby gem、网络服务或账号。
 
+工具栏检查使用 `ruby tests/toolbar_test.rb`。
+
 重新打包：在项目根目录执行 `python build.py --output-dir dist`，即可生成安装包和源码包。也可以将 `src/` 里面的 `model_size_info.rb` 与同名文件夹放在 ZIP 根目录，再将扩展名改为 `.rbz`；不要把 `src/` 文件夹本身作为压缩包最外层。
 
 ## 官方参考
 
+- [工具栏的显示与管理](https://help.sketchup.com/en/sketchup/toolbars)
+- [工具栏 API](https://ruby.sketchup.com/UI/Toolbar.html)
 - [结构管理器中的层级](https://help.sketchup.com/en/sketchup/working-hierarchies-outliner)
 - [模型的顶层 Entities](https://ruby.sketchup.com/Sketchup/Model.html#entities-instance_method)
 - [Entities 与类型筛选示例](https://ruby.sketchup.com/Sketchup/Entities.html)
