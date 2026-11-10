@@ -57,8 +57,10 @@
 
       function ordered(nodes) {
         var entries = nodes.map(function (node, index) { return { node: node, index: index }; });
-        if (sort === 'model') return entries;
         return entries.sort(function (a, b) {
+          if (sort === 'model') {
+            return collator.compare(a.node.id, b.node.id);
+          }
           if (sort === 'size') {
             var aSize = sizes[a.node.definition_id] || {};
             var bSize = sizes[b.node.definition_id] || {};
@@ -196,7 +198,7 @@
         if (finished) calculationFocusPath = null;
         $('tree-empty').hidden = !!(graph && graph.roots.length);
         $('tree-empty').textContent = data.tree_complete ? '模型中没有群组或组件。' :
-          (data.busy ? '正在读取模型层级…' : '读取已暂停，可在“更多”中继续。');
+          (data.busy ? '正在读取模型层级…' : '读取已暂停，点击“继续读取”恢复。');
         $('tree-collapse').disabled = !graph || !graph.roots.length;
         // Keep a stable sibling order during exports; apply the chosen order once
         // the queue finishes, so rows and expanded branches do not jump around.

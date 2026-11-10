@@ -30,7 +30,7 @@
         </div>
         <div class="menu-group menu-info">
           <p id="note">父级大小包含子级，相同组件共享计算结果。</p>
-          <p>1 KB = 1024 字节 · <span id="version">v1.4.0</span></p>
+          <p>1 KB = 1024 字节 · <span id="version">v1.4.1</span></p>
         </div>
       </div>
     </details>
@@ -80,7 +80,10 @@
     </section>
 
     <div id="error" class="error" role="alert" hidden></div>
-    <div id="running-actions" class="running-actions" hidden><button id="cancel" class="text-button" hidden>停止后续任务</button></div>
+    <div id="running-actions" class="running-actions" hidden>
+      <button id="resume-scan" class="text-button" hidden>继续读取</button>
+      <button id="cancel" class="text-button" hidden>停止后续任务</button>
+    </div>
   </main>
   <script src="tree.js"></script>
   <script src="panel.js"></script>

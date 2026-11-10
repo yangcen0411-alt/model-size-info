@@ -34,7 +34,7 @@ function mount(connected = true) {
   const events = {};
   const messages = [];
   const bridge = {};
-  for (const name of ['ready', 'scope', 'auto', 'measure', 'measure_item', 'refresh', 'cancel', 'locate', 'expand', 'load_all']) bridge[name] = (...args) => messages.push({ name, args });
+  for (const name of ['ready', 'scope', 'auto', 'measure', 'measure_item', 'refresh', 'cancel', 'resume_scan', 'locate', 'expand', 'load_all']) bridge[name] = (...args) => messages.push({ name, args });
   const document = {
     body: new Element('body'),
     getElementById(id) { assert.ok(nodes[id], 'Missing HTML element ' + id); return nodes[id]; },
@@ -63,7 +63,7 @@ const base = {
   measurement_state: 'ready', measured_at: null, selected_count: 1, definition_count: 1, direct_entities: 102,
   instance_count: 8, loose_count: 0, pending_count: 0, rows: [{ id: '1', name: '家具组件', kind: '组件', selected_instances: 1, bytes: 1048576 }],
   file: { name: '模型.skp', bytes: 2097152, saved: true, modified: false }, note: '组件定义的独立文件体积。',
-  scope: 'follow', auto: true, auto_limit: 3, busy: false, error: null, version: '1.4.0'
+  scope: 'follow', auto: true, auto_limit: 3, busy: false, error: null, version: '1.4.1'
 };
 api.render(base);
 check('selection renders size and properties', () => { assert.equal(nodes['size-value'].textContent, '1.00'); assert.equal(nodes['size-unit'].textContent, 'MB'); assert.equal(nodes['instance-count'].textContent, '8'); });
@@ -350,4 +350,31 @@ nodes.more.open = true; app.events.click({ target: nodes.more });
 check('clicks within More keep it open', () => assert.equal(nodes.more.open, true));
 app.events.click({ target: new Element() });
 check('clicks outside More close it', () => assert.equal(nodes.more.open, false));
+const scanningGeometry = { ...treeBase, tree_token: 'geometry-progress', tree_complete: false,
+  busy: true, job_kind: 'scan', tree_structure: null, tree_read_progress: { read: 250000, total: 1000000 } };
+api.render(scanningGeometry);
+check('raw geometry scan progress is visible while reading a layer', () => {
+  assert.equal(nodes['tree-status'].textContent, '当前层 25%');
+  assert.match(nodes['tree-detail'].textContent, /250,000 \/ 1,000,000/);
+  assert.equal(nodes['resume-scan'].hidden, true); assert.equal(nodes.cancel.hidden, false);
+});
+api.render({ ...scanningGeometry, busy: false, job_kind: null });
+check('a stopped scan offers a direct read-only continuation', () => {
+  assert.equal(nodes['resume-scan'].hidden, false); assert.equal(nodes['running-actions'].hidden, false);
+  assert.equal(nodes.cancel.hidden, true); assert.equal(nodes['resume-scan'].disabled, false);
+});
+nodes['resume-scan'].events.click.call(nodes['resume-scan']);
+check('scan continuation sends its own callback and blocks immediate repeated clicks', () => {
+  assert.equal(messages.at(-1).name, 'resume_scan'); assert.equal(nodes['resume-scan'].disabled, true);
+});
+api.render({ ...scanningGeometry, busy: false, job_kind: null });
+check('stopping again restores the continuation button', () => assert.equal(nodes['resume-scan'].disabled, false));
+api.render(treeBase);
+check('a completed hierarchy hides scan continuation', () => assert.equal(nodes['resume-scan'].hidden, true));
+const idEntries = ['9007199254740993', '10', '9007199254740992', '2'].map(id => ({ id, definition_id: '501', name: 'ID ' + id, kind: '组件' }));
+api.render({ ...treeBase, tree_token: 'id-sort', tree_root_count: 4, tree_structure: { roots: idEntries, definitions: graph.definitions } });
+nodes['tree-sort'].value = 'model'; nodes['tree-sort'].events.change.call(nodes['tree-sort']);
+check('ID sorting is numeric even for unsorted native input and 64-bit identifiers', () => {
+  assert.deepEqual(rootRows().map(row => row.children[2].children[0].textContent), ['ID 2', 'ID 10', 'ID 9007199254740992', 'ID 9007199254740993']);
+});
 console.log(checks + ' UI logic checks passed.');

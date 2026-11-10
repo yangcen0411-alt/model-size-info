@@ -18,6 +18,7 @@ module Sketchup
   class SelectionObserver; end
   class ModelObserver; end
   class MaterialsObserver; end
+  class EntitiesObserver; end
   class AppObserver; end
   class << self
     attr_accessor :platform

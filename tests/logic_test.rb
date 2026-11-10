@@ -21,6 +21,7 @@ module Sketchup
   class SelectionObserver; end
   class ModelObserver; end
   class MaterialsObserver; end
+  class EntitiesObserver; end
   class AppObserver; end
   class << self
     attr_accessor :active_model
@@ -85,11 +86,11 @@ class ObservableList < Array
 end
 
 class TestEntities < ObservableList
-  attr_reader :iteration_count, :grep_calls
+  attr_reader :iteration_count, :grep_calls, :yield_count
   attr_accessor :forbid_iteration
   def initialize(owner)
     super()
-    @owner, @iteration_count = owner, 0
+    @owner, @iteration_count, @yield_count = owner, 0, 0
     @grep_calls = []
   end
   def <<(entity)
@@ -98,6 +99,8 @@ class TestEntities < ObservableList
       entity.definition.instances << entity unless entity.definition.instances.include?(entity)
     end
     super
+    observers.each { |observer| observer.onElementAdded(self, entity) }
+    self
   end
   def concat(entities)
     entities.each { |entity| self << entity }
@@ -106,7 +109,10 @@ class TestEntities < ObservableList
   def each(&block)
     raise 'Geometry collection must not be enumerated' if @forbid_iteration
     @iteration_count += 1
-    super(&block)
+    super do |entity|
+      @yield_count += 1
+      block.call(entity)
+    end
   end
   def to_a
     raise 'Geometry collection must not be copied' if @forbid_iteration
@@ -175,7 +181,7 @@ end
 
 module ModelFootprintTools
   module SizeInfo
-    VERSION = '1.4.0'
+    VERSION = '1.4.1'
   end
 end
 require_relative '../src/model_size_info/analyzer'

@@ -24,9 +24,9 @@ index = tree_class.new(model)
 check.call('reading a large level can yield after one item') { !index.step(1) && index.scanned_instances == 1 }
 index.step until index.complete?
 payload = index.payload
-check.call('first open lists roots without entering their definitions') { index.definitions == [parent] && parent.entities.grep_calls.empty? && leaf.entities.grep_calls.empty? }
+check.call('first open lists roots without entering their definitions') { index.definitions == [parent] && parent.entities.iteration_count.zero? && leaf.entities.iteration_count.zero? }
 check.call('unread children are explicit rather than reported as empty') { payload[:definitions]['502'][:loaded] == false && payload[:definitions]['502'][:children].nil? && !index.all_loaded? }
-check.call('only groups and components are returned in stable object-ID order') { payload[:roots].map { |node| node[:id] } == [first, second].map { |item| item.persistent_id.to_s } }
+check.call('only groups and components are returned from the requested collection') { payload[:roots].map { |node| node[:id] } == [first, second].map { |item| item.persistent_id.to_s } }
 check.call('locked roots remain visible') { payload[:roots][1][:locked] }
 index.acknowledge_delta
 check.call('unchanged directory has no structural update to resend') { index.delta.nil? }
@@ -35,9 +35,9 @@ index.step until index.complete?
 payload = index.payload
 check.call('expansion returns a definition delta without resending all roots') { index.delta[:roots].nil? && index.delta[:definitions]['502'][:children].length == 1 }
 check.call('nested names and visibility flags remain literal data') { payload[:definitions]['502'][:children][0][:hidden] && payload[:definitions]['501'][:name] == '<桌腿 & 中文>' }
-check.call('the child itself is still unread until requested') { payload[:definitions]['501'][:children].nil? && leaf.entities.grep_calls.empty? }
-before = parent.entities.grep_calls.length
-check.call('shared parent definitions are not read again') { !index.request('502') && index.complete? && parent.entities.grep_calls.length == before }
+check.call('the child itself is still unread until requested') { payload[:definitions]['501'][:children].nil? && leaf.entities.iteration_count.zero? }
+before = parent.entities.iteration_count
+check.call('shared parent definitions are not read again') { !index.request('502') && index.complete? && parent.entities.iteration_count == before }
 path = "#{second.persistent_id}.#{child.persistent_id}"
 check.call('nested location uses the chosen shared parent instance') { index.resolve(path) == [second, child] }
 begin
@@ -64,7 +64,7 @@ end
 child.erased = false
 index.request_all
 index.step until index.complete?
-check.call('explicit full reading reaches every used level and excludes unused definitions') { index.all_loaded? && index.definitions.length == 2 && unused.entities.grep_calls.empty? }
+check.call('explicit full reading reaches every used level and excludes unused definitions') { index.all_loaded? && index.definitions.length == 2 && unused.entities.iteration_count.zero? }
 check.call('a leaf becomes a confirmed empty child list after it is read') { index.payload[:definitions]['501'][:children] == [] && index.payload[:definitions]['501'][:loaded] }
 check.call('the latest level exposes measured reading duration') { index.last_read_seconds.is_a?(Float) && index.last_read_seconds >= 0 }
 
@@ -137,7 +137,7 @@ def outer.instances; raise 'Global instance index must never be read'; end
 huge.definitions.define_singleton_method(:each) { raise 'Global definition catalog must never be enumerated' }
 fast = tree_class.new(huge)
 fast.step until fast.complete?
-check.call('3700 descendant definitions do not delay first root-level reading') { fast.definitions == [outer] && fast.entry_count == 1 && outer.entities.grep_calls.empty? && huge.entities.grep_calls.length == 2 }
+check.call('3700 descendant definitions do not delay first root-level reading') { fast.definitions == [outer] && fast.entry_count == 1 && outer.entities.iteration_count.zero? && huge.entities.iteration_count == 1 }
 fast.request('9000')
 check.call('reading a wide child level yields before all 3700 rows are built') { !fast.step(100) && fast.entry_count > 1 && fast.entry_count <= 101 }
 fast.step until fast.complete?
@@ -186,7 +186,7 @@ dialog.event('expand', { 'token' => dialog.last_data['tree_token'], 'path' => ba
 UI.drain
 check.call('continuing a batch skips already measured definitions') { batch_definitions.all? { |definition| definition.exports == 1 } && dialog.last_data['tree_measured'] == 45 }
 check.call('expansion queued during exports runs afterwards without canceling measurements') { dialog.last_data['definition_count'] == 46 && dialog.last_data['pending_count'] == 1 && dialog.last_data['tree_complete'] }
-check.call('export timers no longer impose an 80-ms gap per definition') { UI.timer_intervals.all? { |seconds| seconds <= 0.001 } }
+check.call('only hierarchy reads use the longer UI timer interval') { UI.timer_intervals.include?(0.001) && UI.timer_intervals.include?(0.025) && UI.timer_intervals.all? { |seconds| [0.001, 0.025].include?(seconds) } }
 panel.model_changed
 UI.drain
 exports_before_cancel = batch_definitions.sum(&:exports)
@@ -238,7 +238,7 @@ check.call('a row request exposes the definition being calculated') { item_dialo
 item_dialog.event('measure_item', parent_request)
 UI.drain
 item_analyzer = item_panel.instance_variable_get(:@analyzer)
-check.call('a parent calculation exports one full definition without reading or exporting descendants') { item_parent.exports == 1 && item_child.exports == 0 && item_other.exports == 0 && item_parent.entities.grep_calls.empty? && item_analyzer.cached_by_id('30000')[:bytes] == 8192 }
+check.call('a parent calculation exports one full definition without reading or exporting descendants') { item_parent.exports == 1 && item_child.exports == 0 && item_other.exports == 0 && item_parent.entities.iteration_count.zero? && item_analyzer.cached_by_id('30000')[:bytes] == 8192 }
 item_dialog.event('measure_item', { 'token' => item_token, 'path' => shared_instance.persistent_id.to_s, 'force' => false })
 UI.drain
 check.call('another instance reuses the same cached size without exporting again') { item_parent.exports == 1 && item_dialog.last_data['tree_measuring_id'].nil? && !item_dialog.last_data['busy'] }
@@ -259,10 +259,10 @@ check.call('a row retry clears its error without recalculating unrelated definit
 
 item_dialog.event('load_all')
 item_dialog.event('cancel')
-queries_before_single = item_parent.entities.grep_calls.length
+queries_before_single = item_parent.entities.iteration_count
 item_dialog.event('measure_item', parent_request.merge('force' => true))
 UI.drain
-check.call('a single calculation does not resume a directory read that the user stopped') { !item_dialog.last_data['tree_complete'] && item_parent.entities.grep_calls.length == queries_before_single && UI.timer_count == 0 }
+check.call('a single calculation does not resume a directory read that the user stopped') { !item_dialog.last_data['tree_complete'] && item_parent.entities.iteration_count == queries_before_single && UI.timer_count == 0 }
 item_dialog.event('load_all')
 UI.drain
 parent_exports_before_child = item_parent.exports
@@ -278,4 +278,154 @@ UI.drain
 item_dialog.event('measure_item', parent_request)
 check.call('a calculation request from a stale tree is rejected after an edit') { item_dialog.last_data['error'].include?('组件树已更新') && item_parent.exports == parent_exports_before_child }
 item_dialog.close
+
+# The previous scan budget started after two complete grep passes. Count raw
+# geometry visits to ensure that opening a dense context itself can yield.
+class DenseTestEntities < TestEntities
+  attr_accessor :on_visit
+
+  def initialize(owner, total, containers = {})
+    super(owner)
+    @total = total
+    @containers = containers
+    @raw = Sketchup::Face.new
+    def @raw.persistent_id; raise 'Raw geometry must not have metadata read'; end
+    def @raw.valid?; raise 'Raw geometry must not have metadata read'; end
+  end
+
+  def length
+    @total
+  end
+
+  def each
+    @iteration_count += 1
+    @total.times do |position|
+      @yield_count += 1
+      @on_visit.call if @on_visit
+      yield @containers.fetch(position, @raw)
+    end
+  end
+
+  def grep(*)
+    raise 'A complete geometry filter must never run'
+  end
+
+  def to_a
+    raise 'A complete geometry copy must never run'
+  end
+
+  def [](*)
+    raise 'Indexed geometry traversal must never run'
+  end
+end
+
+dense_model = TestModel.new
+dense_definition = TestDefinition.new(40_000, '密集模型组件', 8)
+dense_first = Sketchup::Group.new(dense_definition, '首项')
+dense_last = Sketchup::ComponentInstance.new(dense_definition, '尾项')
+dense_entities = DenseTestEntities.new(dense_model, 1_000_000, { 0 => dense_first, 999_999 => dense_last })
+dense_model.instance_variable_set(:@entities, dense_entities)
+dense_index = tree_class.new(dense_model)
+check.call('creating a dense index performs no geometry work') { dense_entities.yield_count.zero? && dense_entities.iteration_count.zero? }
+dense_index.step(100, 1)
+check.call('the first slice counts faces against its visit limit') { dense_entities.yield_count == 100 && dense_index.entry_count == 1 && !dense_index.complete? }
+check.call('dense layer progress includes skipped raw geometry') { dense_index.read_progress == { read: 100, total: 1_000_000 } }
+dense_index.step(100, 1)
+check.call('another slice resumes the same native iterator') { dense_entities.yield_count == 200 && dense_entities.iteration_count == 1 }
+dense_index.step until dense_index.complete?
+check.call('a million raw visits keep only containers and share definitions') { dense_entities.yield_count == 1_000_000 && dense_index.root_count == 2 && dense_index.definitions == [dense_definition] && dense_definition.entities.iteration_count.zero? }
+check.call('finishing a dense read detaches its context observer') { dense_entities.observers.empty? && dense_index.read_progress.nil? && dense_entities.iteration_count == 1 }
+
+budget_model = TestModel.new
+budget_entities = DenseTestEntities.new(budget_model, 1000)
+budget_model.instance_variable_set(:@entities, budget_entities)
+budget_index = tree_class.new(budget_model)
+budget_clock = 0.0
+budget_index.define_singleton_method(:monotonic) { budget_clock }
+budget_entities.on_visit = -> { budget_clock += 0.001 }
+budget_index.step(1000, 0.003)
+check.call('the time budget is checked while filtering raw geometry') { (3..4).include?(budget_entities.yield_count) && !budget_index.complete? }
+budget_index.dispose
+check.call('disposing an interrupted iterator removes its observer') { budget_entities.observers.empty? }
+
+[:onElementAdded, :onElementModified, :onElementRemoved, :onEraseEntities].each do |event|
+  changed_model = TestModel.new
+  changed_entities = DenseTestEntities.new(changed_model, 100)
+  changed_model.instance_variable_set(:@entities, changed_entities)
+  changed_index = tree_class.new(changed_model)
+  changed_index.step(1)
+  listener = changed_entities.observers.first
+  arguments = event == :onEraseEntities ? [changed_entities] : [changed_entities, 123]
+  listener.public_send(event, *arguments)
+  begin
+    changed_index.step
+    raise 'Changed geometry must not resume an old native iterator'
+  rescue RuntimeError => error
+    check.call("#{event} prevents stale iterator access") { error.message.include?('内容已变化') && changed_entities.yield_count == 1 }
+  ensure
+    changed_index.dispose
+  end
+end
+
+scan_model = TestModel.new
+scan_definition = TestDefinition.new(40_001, '仅按需计算', 8)
+scan_instance = Sketchup::Group.new(scan_definition, '可暂停项')
+scan_entities = DenseTestEntities.new(scan_model, 100_000, { 0 => scan_instance })
+scan_model.instance_variable_set(:@entities, scan_entities)
+scan_model.definitions << scan_definition
+Sketchup.active_model = scan_model
+scan_panel = ModelFootprintTools::SizeInfo::Panel.new
+scan_panel.show
+scan_dialog = scan_panel.instance_variable_get(:@dialog)
+UI.timer_intervals = []
+scan_dialog.event('ready')
+check.call('opening a dense panel schedules work before touching geometry') { scan_entities.yield_count.zero? && scan_dialog.last_data['busy'] && UI.timer_intervals == [0.025] }
+UI.tick
+check.call('the first native callback yields during dense root reading') { scan_entities.yield_count > 0 && scan_entities.yield_count <= 1000 && scan_dialog.last_data['tree_read_progress']['total'] == 100_000 && UI.timer_count == 1 }
+scan_dialog.event('cancel')
+stopped_at = scan_entities.yield_count
+UI.drain
+check.call('cancel stops raw geometry visits as well as row creation') { !scan_dialog.last_data['busy'] && !scan_dialog.last_data['tree_complete'] && scan_entities.yield_count == stopped_at && UI.timer_count.zero? }
+scan_dialog.event('resume_scan')
+UI.drain
+check.call('resuming a dense root scan reuses the cursor and performs no export') { scan_dialog.last_data['tree_complete'] && scan_entities.yield_count == 100_000 && scan_entities.iteration_count == 1 && scan_definition.exports.zero? && scan_entities.observers.empty? }
+
+nested_dense = DenseTestEntities.new(scan_definition, 100_000)
+scan_definition.instance_variable_set(:@entities, nested_dense)
+scan_token = scan_dialog.last_data['tree_token']
+scan_dialog.event('expand', { 'token' => scan_token, 'path' => scan_instance.persistent_id.to_s })
+check.call('expanding a dense component schedules its filter before any visits') { nested_dense.yield_count.zero? && scan_dialog.last_data['busy'] }
+UI.tick
+scan_dialog.event('cancel')
+check.call('a face-only component can be paused during its first scan') { nested_dense.yield_count > 0 && nested_dense.yield_count <= 1000 && !scan_dialog.last_data['tree_complete'] }
+scan_dialog.event('resume_scan')
+UI.drain
+check.call('resuming a dense leaf completes once and keeps file size on demand') { scan_dialog.last_data['tree_complete'] && scan_dialog.last_data['tree_all_loaded'] && nested_dense.iteration_count == 1 && nested_dense.yield_count == 100_000 && scan_definition.exports.zero? && nested_dense.observers.empty? }
+scan_dialog.event('refresh')
+UI.tick
+scan_dialog.close
+check.call('closing during raw scanning releases observers and timers') { scan_entities.observers.empty? && UI.timer_count.zero? }
+
+reentrant_model = TestModel.new
+reentrant_definition = TestDefinition.new(40_002, '编辑期间', 8)
+reentrant_instance = Sketchup::Group.new(reentrant_definition)
+reentrant_entities = DenseTestEntities.new(reentrant_model, 5000, { 0 => reentrant_instance })
+reentrant_model.instance_variable_set(:@entities, reentrant_entities)
+reentrant_model.definitions << reentrant_definition
+Sketchup.active_model = reentrant_model
+reentrant_panel = ModelFootprintTools::SizeInfo::Panel.new
+reentrant_panel.show
+reentrant_dialog = reentrant_panel.instance_variable_get(:@dialog)
+reentrant_entities.on_visit = lambda do
+  reentrant_entities.on_visit = nil
+  reentrant_panel.model_changed
+end
+reentrant_dialog.event('ready')
+original_scan_token = reentrant_dialog.last_data['tree_token']
+UI.tick
+check.call('an edit during native enumeration preserves the replacement refresh') { reentrant_dialog.last_data['tree_token'] != original_scan_token && reentrant_dialog.last_data['error'].nil? && UI.timer_count == 1 && reentrant_entities.observers.empty? }
+UI.drain
+check.call('the replacement scan finishes with a fresh iterator and no export') { reentrant_dialog.last_data['tree_complete'] && reentrant_dialog.last_data['error'].nil? && reentrant_entities.iteration_count == 2 && reentrant_definition.exports.zero? }
+reentrant_dialog.close
+
 puts "#{passed.length} tree checks passed."

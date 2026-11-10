@@ -4,6 +4,22 @@ module ModelFootprintTools
     # Only requested drawing contexts are read. Opening the panel never walks
     # DefinitionList or fetches all instances of every component definition.
     class ComponentTree
+      class ContextListener < Sketchup::EntitiesObserver
+        def initialize(index)
+          @index = index
+        end
+
+        def onElementAdded(_entities, _entity)
+          @index.context_changed
+        end
+        alias_method :onElementModified, :onElementAdded
+        alias_method :onElementRemoved, :onElementAdded
+
+        def onEraseEntities(_entities)
+          @index.context_changed
+        end
+      end
+
       attr_reader :scanned_instances, :scanned_definitions, :entry_count,
                   :definitions_by_id, :last_read_seconds
 
@@ -14,6 +30,8 @@ module ModelFootprintTools
         @loaded, @queued, @dirty = {}, { nil => true }, {}
         @jobs, @job_offset = [nil], 0
         @active = nil
+        @context_listener = ContextListener.new(self)
+        @context_changed = false
         @root_loaded = @roots_dirty = @eager = false
         @scanned_instances = @scanned_definitions = @entry_count = 0
         @last_read_seconds = nil
@@ -49,21 +67,42 @@ module ModelFootprintTools
         @definitions_by_id.each_key { |id| request(id) }
       end
 
-      def step(limit = 1000, seconds = 0.012)
+      def context_changed
+        @context_changed = true
+      end
+
+      def dispose
+        detach_context
+        @context_changed = true
+      end
+
+      def read_progress
+        return nil unless @active
+        { read: @active[:offset], total: @active[:total] }
+      end
+
+      def step(limit = 1000, seconds = 0.008)
+        raise '模型内容已变化，请刷新列表后继续读取。' if @context_changed
         return true if complete?
         deadline = monotonic + seconds
         processed = 0
         loop do
           start_next unless @active
           break unless @active
-          while @active[:offset] < @active[:items].length && processed < limit
-            id, entity = @active[:items][@active[:offset]]
-            @active[:offset] += 1
-            add_node(id, entity, @active[:destination])
-            processed += 1
-            break if (processed % 32).zero? && monotonic >= deadline
+          raise '模型内容已变化，请刷新列表后继续读取。' if @context_changed
+          begin
+            entity = @active[:iterator].next
+          rescue StopIteration
+            finish_active
           end
-          finish_active if @active[:offset] == @active[:items].length
+          if @active
+            raise '模型内容已变化，请刷新列表后继续读取。' if @context_changed
+            @active[:offset] += 1
+            if entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance)
+              add_node(entity.persistent_id.to_s, entity, @active[:destination])
+            end
+            processed += 1
+          end
           break if processed >= limit || monotonic >= deadline
         end
         complete?
@@ -120,13 +159,12 @@ module ModelFootprintTools
         @job_offset += 1
         started = monotonic
         entities = id ? @definitions_by_id.fetch(id).entities : @model.entities
-        # Type filtering is confined to this context. It does not descend into
-        # unopened definitions or create a Ruby Enumerator for every face.
-        items = entities.grep(Sketchup::Group) + entities.grep(Sketchup::ComponentInstance)
-        items = items.select(&:valid?).map { |entity| [entity.persistent_id.to_s, entity] }
-        items.sort_by! { |entry| entry[0].to_i }
-        @active = { id: id, items: items, offset: 0, started: started,
+        # Resume one native iterator between timer callbacks. Every visited
+        # entity, including raw geometry, counts against the slice budget.
+        @active = { id: id, entities: entities, iterator: entities.to_enum(:each),
+                    offset: 0, total: entities.length, started: started,
                     destination: id ? @children.fetch(id) : @roots }
+        entities.add_observer(@context_listener)
       end
 
       def add_node(id, entity, destination)
@@ -156,6 +194,7 @@ module ModelFootprintTools
       def finish_active
         id = @active[:id]
         @last_read_seconds = monotonic - @active[:started]
+        detach_context
         if id
           @loaded[id] = true
           @dirty[id] = true
@@ -164,6 +203,13 @@ module ModelFootprintTools
           @root_loaded = @roots_dirty = true
         end
         @queued.delete(id)
+      end
+
+      def detach_context
+        @active[:entities].remove_observer(@context_listener) if @active
+      rescue StandardError
+        # A deleted drawing context may have disposed its native collection.
+      ensure
         @active = nil
       end
 

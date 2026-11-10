@@ -98,6 +98,7 @@ module ModelFootprintTools
       AUTO_LIMIT = 3
       EXPORT_BATCH_LIMIT = 20
       EXPORT_SLICE_SECONDS = 0.012
+      SCAN_INTERVAL_SECONDS = 0.025
 
       def initialize
         @dialog = nil
@@ -276,6 +277,10 @@ module ModelFootprintTools
           cancel
           render
         end
+        @dialog.add_action_callback('resume_scan') do |_context|
+          next unless active? && @scope == 'tree' && !@busy
+          scan_tree(false)
+        end
         @dialog.add_action_callback('locate') do |_context, request|
           locate_tree_item(request)
         end
@@ -403,6 +408,7 @@ module ModelFootprintTools
       end
 
       def reset_tree
+        @tree_index.dispose if @tree_index
         @tree_index = nil
         @tree_errors = {}
         @tree_sizes_sent = {}
@@ -428,6 +434,7 @@ module ModelFootprintTools
           tree_complete: index ? index.complete? : false,
           tree_all_loaded: index ? index.all_loaded? : false,
           tree_read_seconds: index && index.last_read_seconds,
+          tree_read_progress: index && index.read_progress,
           tree_root_count: index ? index.root_count : 0,
           tree_scanned: index ? index.scanned_instances : 0,
           tree_scanned_definitions: index ? index.scanned_definitions : 0,
@@ -459,7 +466,7 @@ module ModelFootprintTools
       end
 
       def scan_tree_next(measure_after, token)
-        @job_timer = UI.start_timer(0.001, false) do
+        @job_timer = UI.start_timer(SCAN_INTERVAL_SECONDS, false) do
           @job_timer = nil
           next unless token == @generation && active? && @scope == 'tree'
           begin
@@ -475,6 +482,7 @@ module ModelFootprintTools
               scan_tree_next(measure_after, token)
             end
           rescue StandardError => error
+            next unless token == @generation && active? && @scope == 'tree'
             @busy = false
             @job_kind = nil
             reset_tree

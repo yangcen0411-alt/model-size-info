@@ -49,6 +49,7 @@
     current = data;
     var model = data.kind === 'model';
     var isTree = data.kind === 'tree';
+    var pausedScan = isTree && !data.busy && !data.tree_complete;
     document.body.classList.toggle('tree-mode', isTree);
     setHidden('primary', isTree); setHidden('properties', isTree); setHidden('tree-view', !isTree);
     setHidden('primary-actions', isTree); setHidden('tree-options', !isTree); setHidden('scope-tree', isTree);
@@ -83,7 +84,9 @@
     setText('note', data.note);
     setText('error', data.error || ''); setHidden('error', !data.error);
     setHidden('progress', !data.busy); setHidden('cancel', !data.busy);
-    setHidden('running-actions', !data.busy);
+    setHidden('running-actions', !data.busy && !pausedScan);
+    setHidden('resume-scan', !pausedScan);
+    $('resume-scan').disabled = data.busy;
     setText('measure', model ? '测量当前模型' : (data.bytes === null ? '测量选中定义' : '重新测量'));
     $('measure').disabled = data.busy || (!model && !data.rows.length);
     setText('measure-current', $('measure').textContent);
@@ -94,14 +97,20 @@
       setText('tree-definition-count', count(data.definition_count));
       setText('tree-measured-count', count(data.tree_measured));
       var scanning = data.job_kind === 'scan' || (!data.tree_complete && data.job_kind !== 'tree');
-      var treeDetail = scanning ? (data.busy ? '正在读取请求的层级，已发现 ' + count(data.definition_count) + ' 个定义…' : '读取已暂停，可继续读取层级并测量。') :
+      var treeDetail = scanning ? (data.busy ? '正在读取请求的层级，已发现 ' + count(data.definition_count) + ' 个定义…' : '读取已暂停，点击“继续读取”恢复。') :
         (data.busy ? '正在测量 ' + count(data.tree_measured) + ' / ' + count(data.definition_count) + ' 个定义…' :
           (data.tree_all_loaded ? '全部层级已读取。' : '当前层级已就绪，展开时读取子项。') +
           (data.pending_count ? '点击行内“计算大小”查看体积。' : '父级包含子级，逐项查看。'));
       if (data.tree_measuring_id && data.busy) treeDetail = '正在计算所点项目的完整 SKP 体积…';
+      var readProgress = data.tree_read_progress;
+      var scanLabel = '正在扫描';
+      if (scanning && readProgress && readProgress.total > 0) {
+        scanLabel = '当前层 ' + Math.min(100, Math.floor(readProgress.read / readProgress.total * 100)) + '%';
+        treeDetail += ' 已检查 ' + count(readProgress.read) + ' / ' + count(readProgress.total) + ' 个图元。';
+      }
       if (!data.busy && data.tree_read_seconds != null) treeDetail += ' 最近读取 ' + data.tree_read_seconds.toFixed(2) + ' 秒。';
       setText('tree-detail', treeDetail);
-      setText('tree-status', data.error ? (data.tree_errors ? '计算失败' : '查看提示') : (data.busy ? (scanning ? '正在扫描' : '正在计算') : (scanning ? '已暂停' : '层级已就绪')));
+      setText('tree-status', data.error ? (data.tree_errors ? '计算失败' : '查看提示') : (data.busy ? (scanning ? scanLabel : '正在计算') : (scanning ? '已暂停' : '层级已就绪')));
       $('tree-status').className = 'status ' + (data.error ? 'error' : (data.busy ? 'busy' : (!scanning ? 'ready' : '')));
       setHidden('tree-progress', !data.busy);
       setText('measure', scanning ? '继续读取并批量计算' : (data.pending_count ? '批量计算已读取项' : '批量重新计算'));
@@ -137,6 +146,7 @@
   $('measure').addEventListener('click', function () { closeMenu(true); send('measure'); });
   $('measure-current').addEventListener('click', function () { send('measure'); });
   $('cancel').addEventListener('click', function () { send('cancel'); });
+  $('resume-scan').addEventListener('click', function () { this.disabled = true; send('resume_scan'); });
   $('refresh').addEventListener('click', function () { send('refresh'); });
   $('load-all').addEventListener('click', function () { closeMenu(true); send('load_all'); });
   $('tree-collapse').addEventListener('click', function () { closeMenu(true); });
