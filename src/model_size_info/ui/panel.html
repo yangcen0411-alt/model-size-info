@@ -9,80 +9,41 @@
 <body class="tree-mode">
   <header class="header">
     <h1>模型占用信息</h1>
-    <button id="scope-tree" class="text-button back-button" hidden aria-pressed="true">返回列表</button>
-    <button id="refresh" class="icon-button" title="清除结果并重新读取列表" aria-label="刷新">
+    <button id="refresh" class="icon-button" title="读取最新保存的文件" aria-label="刷新">
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M19 11a7 7 0 0 0-12-5L4 9m16 6-3 3A7 7 0 0 1 5 13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <details id="more" class="more">
       <summary id="more-toggle">更多</summary>
       <div class="more-panel">
         <div class="menu-group">
-          <button id="scope-follow" class="menu-button" aria-pressed="false">查看所选对象</button>
-          <button id="scope-model" class="menu-button" aria-pressed="false">查看整个模型</button>
-        </div>
-        <div id="tree-options" class="menu-group">
-          <label class="sort-option" for="tree-sort">排序<select id="tree-sort"><option value="size">大小优先</option><option value="name">名称</option><option value="model">对象编号</option></select></label>
+          <label class="sort-option" for="tree-sort">已读取项排序<select id="tree-sort"><option value="size">大小优先</option><option value="name">名称</option><option value="model">对象编号</option></select></label>
           <button id="tree-collapse" class="menu-button">收起全部</button>
-          <button id="load-all" class="menu-button" disabled>读取全部层级</button>
-          <button id="measure" class="menu-button" disabled>批量计算已读取项</button>
-          <div class="menu-stats"><span>顶层 <b id="tree-root-count">—</b></span><span>已发现 <b id="tree-definition-count">—</b></span><span>已计算 <b id="tree-measured-count">—</b></span></div>
-          <p id="tree-detail" class="menu-note">展开时读取子项，按需计算大小。</p>
+          <div class="menu-stats"><span>顶层 <b id="tree-root-count">—</b></span><span>已读取 <b id="tree-definition-count">—</b></span><span>已计算 <b id="tree-measured-count">—</b></span></div>
         </div>
         <div class="menu-group menu-info">
-          <p id="note">父级大小包含子级，相同组件共享计算结果。</p>
-          <p>1 KB = 1024 字节 · <span id="version">v1.4.1</span></p>
+          <p id="note">后台分析已保存的文件。修改后保存并刷新，父级大小包含子级。</p>
+          <p>1 KB = 1024 字节 · <span id="version">v1.5.0</span></p>
         </div>
       </div>
     </details>
   </header>
-
-  <section class="model-file" aria-label="模型上次保存的文件大小">
-    <div class="file-content"><span id="file-name" class="file-name">正在连接…</span><span class="file-caption">上次保存的文件大小</span></div>
+  <section class="model-file" aria-label="已保存模型的文件大小">
+    <div class="file-content"><span id="file-name" class="file-name">正在连接…</span><span class="file-caption">已保存文件 · 后台分析</span></div>
     <div class="file-meta"><strong id="file-size">—</strong><span id="file-state">尚未保存</span></div>
   </section>
-
+  <p id="source-note" class="source-note" hidden>模型有未保存修改，结果来自上次保存。</p>
   <main>
-    <section id="tree-view" class="tree-card" aria-label="模型组件树">
+    <section id="tree-view" class="tree-card" aria-label="已保存模型组件树">
       <div class="tree-columns"><span>群组 / 组件</span><span title="独立保存的 SKP 文件大小，父级包含子级">文件大小</span></div>
-      <div id="tree-empty" class="tree-empty">正在读取模型层级…</div>
+      <div id="tree-empty" class="tree-empty">正在连接 SketchUp…</div>
       <ul id="component-tree" class="component-tree" aria-label="群组和组件层级"></ul>
       <div id="tree-progress" class="progress" hidden><span></span></div>
       <div class="tree-footer"><span id="tree-status" class="status" role="status">正在连接</span><span>父级大小包含子级</span></div>
     </section>
-
-    <section id="primary" class="card primary" aria-live="polite" aria-atomic="true" hidden>
-      <div class="context-line"><span id="kind" class="type-label">正在连接</span><span id="status" class="status">等待 SketchUp</span></div>
-      <h2 id="object-name">—</h2>
-      <p id="measurement-label" class="eyebrow">文件体积</p>
-      <div class="size-line"><strong id="size-value">—</strong><span id="size-unit"></span></div>
-      <p id="size-detail" class="size-detail">选中群组或组件后查看文件大小。</p>
-      <div id="progress" class="progress" hidden><span></span></div>
-    </section>
-
-    <div id="primary-actions" class="actions" hidden>
-      <button id="measure-current" class="primary-button" disabled>计算大小</button>
-      <label id="auto-option" class="auto-option"><input id="auto" type="checkbox" checked><span>自动计算选择</span></label>
-    </div>
-
-    <details id="properties" class="card properties" hidden>
-      <summary>对象信息</summary>
-      <dl>
-        <div id="selected-row"><dt>选中图元</dt><dd id="selected-count">—</dd></div>
-        <div><dt id="definition-label">不同定义</dt><dd id="definition-count">—</dd></div>
-        <div id="entities-row"><dt id="entities-label">内部图元（当前层）</dt><dd id="direct-entities">—</dd></div>
-        <div id="instances-row"><dt>定义在模型中的实例</dt><dd id="instance-count">—</dd></div>
-      </dl>
-    </details>
-
-    <section id="breakdown" class="card breakdown" hidden>
-      <div class="section-title"><h3>各对象大小</h3></div>
-      <div id="definition-list" class="definition-list"></div>
-    </section>
-
     <div id="error" class="error" role="alert" hidden></div>
     <div id="running-actions" class="running-actions" hidden>
+      <button id="cancel" class="text-button" hidden>停止后台任务</button>
       <button id="resume-scan" class="text-button" hidden>继续读取</button>
-      <button id="cancel" class="text-button" hidden>停止后续任务</button>
     </div>
   </main>
   <script src="tree.js"></script>

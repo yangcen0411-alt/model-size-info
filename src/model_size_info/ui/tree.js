@@ -78,7 +78,7 @@
         options.send('locate', { token: token, path: path });
       }
 
-      function renderLevel(parent, nodes, prefix, ancestors, depth) {
+      function renderLevel(parent, nodes, prefix, ancestors, depth, contextId) {
         var entries = ordered(nodes);
         var count = Math.min(limits[prefix] || pageSize, entries.length);
         entries.slice(0, count).forEach(function (entry) {
@@ -111,7 +111,7 @@
             (!isLoaded && !cycle ? ' · 展开读取' : '') +
             (node.hidden ? ' · 隐藏' : '') + (node.locked ? ' · 锁定' : '') + (cycle ? ' · 循环引用' : '');
           meta.setAttribute('aria-hidden', 'true');
-          name.title = nameOf(node) + ' · ' + meta.textContent + '。点击定位，嵌套对象会打开父级编辑环境。';
+          name.title = nameOf(node) + ' · ' + meta.textContent + '。点击选择，嵌套对象会打开父级编辑环境。';
           name.appendChild(title); name.appendChild(meta);
           name.addEventListener('click', function () { selectRow(path); });
           var size = document.createElement('span');
@@ -136,7 +136,7 @@
           if (opened) {
             var nested = document.createElement('ul'); nested.className = 'tree-children';
             item.appendChild(nested);
-            if (isLoaded) renderLevel(nested, children, path, ancestors.concat(node.definition_id), depth + 1);
+            if (isLoaded) renderLevel(nested, children, path, ancestors.concat(node.definition_id), depth + 1, node.definition_id);
             else {
               var placeholder = document.createElement('li'); placeholder.className = 'tree-placeholder';
               placeholder.textContent = busy ? (jobKind === 'tree' ? '等待测量结束后读取…' : '正在读取此层级…') : '等待读取。收起后展开可继续。';
@@ -150,6 +150,17 @@
           more.textContent = '再显示 ' + Math.min(pageSize, entries.length - count) + ' 项（剩余 ' + (entries.length - count) + '）';
           more.addEventListener('click', function () { limits[prefix] = count + pageSize; draw(); });
           moreItem.appendChild(more); parent.appendChild(moreItem);
+        } else if (contextId ? graph.definitions[contextId].more : graph.root_more) {
+          var readItem = document.createElement('li'); readItem.className = 'tree-more';
+          var readMore = document.createElement('button'); readMore.className = 'text-button';
+          readMore.textContent = '再读取 100 项'; readMore.disabled = busy;
+          readMore.addEventListener('click', function () {
+            if (busy) return;
+            readMore.disabled = true;
+            limits[prefix] = count + pageSize;
+            options.send('more', { token: token, path: prefix });
+          });
+          readItem.appendChild(readMore); parent.appendChild(readItem);
         }
       }
 
@@ -186,8 +197,9 @@
         }
         Object.keys(data.tree_sizes || {}).forEach(function (id) { sizes[id] = data.tree_sizes[id]; });
         if (data.tree_structure) {
-          if (!graph) graph = { roots: [], definitions: {} };
+          if (!graph) graph = { roots: [], definitions: {}, root_more: false };
           if (data.tree_structure.roots != null) graph.roots = data.tree_structure.roots;
+          graph.root_more = !!data.tree_structure.root_more;
           Object.keys(data.tree_structure.definitions).forEach(function (id) { graph.definitions[id] = data.tree_structure.definitions[id]; });
           changed = true;
         }

@@ -1,68 +1,56 @@
 # encoding: UTF-8
-# Run with Ruby 2.7+; no SketchUp application is launched or modified.
 require 'json'
 require 'tmpdir'
-
+require_relative '../src/model_size_info/analyzer'
+require_relative '../src/model_size_info/component_tree'
 module Sketchup
-  class Drawingelement
-    attr_accessor :name, :definition, :hidden, :locked, :erased, :parent
-    attr_reader :persistent_id
-    def initialize(definition = nil, name = '')
-      @definition, @name = definition, name
-      @persistent_id = (@@next_id = (defined?(@@next_id) ? @@next_id : 100_000) + 1)
-    end
-    def valid?; !@erased; end
-    def hidden?; !!@hidden; end
-    def locked?; !!@locked; end
-  end
-  class Group < Drawingelement; end
-  class ComponentInstance < Drawingelement; end
-  class Face < Drawingelement; end
-  class SelectionObserver; end
   class ModelObserver; end
-  class MaterialsObserver; end
-  class EntitiesObserver; end
   class AppObserver; end
+  class Definition
+    attr_reader :persistent_id
+    def initialize(id); @persistent_id = id; end
+  end
+  class ComponentInstance
+    attr_accessor :parent
+    attr_reader :definition
+    def initialize(id); @definition = Definition.new(id); end
+    def valid?; true; end
+  end
+  class Group < ComponentInstance; end
   class << self
     attr_accessor :active_model
-    def read_default(*); true; end
-    def write_default(*); true; end
-    def add_observer(observer); (@observers ||= []) << observer; end
-    def remove_observer(observer); (@observers ||= []).delete(observer); end
-    def observer_count; (@observers ||= []).length; end
+    def observers; @observers ||= []; end
+    def add_observer(observer); observers << observer; end
+    def remove_observer(observer); observers.delete(observer); end
   end
 end
-
 module UI
-  @timers = {}
-  @next_id = 0
+  @timers, @counter = {}, 0
   class << self
-    attr_accessor :timer_intervals
-    def start_timer(_seconds, _repeat = false, &block)
-      (@timer_intervals ||= []) << _seconds
-      @next_id += 1
-      @timers[@next_id] = block
-      @next_id
+    attr_reader :timers
+    def start_timer(interval, repeat, &block)
+      raise 'Zero-delay loop' if interval < 0.05
+      @counter += 1
+      @timers[@counter] = [interval, block]
+      @counter
     end
     def stop_timer(id); @timers.delete(id); end
-    def tick
-      key = @timers.keys.min
-      @timers.delete(key).call if key
+    def step
+      pair = @timers.first
+      return false unless pair
+      @timers.delete(pair[0]); pair[1][1].call
+      true
     end
-    def timer_count; @timers.length; end
     def drain
-      1000.times { tick if @timers.length > 0 }
-      raise 'Timer loop detected' if @timers.length > 0
+      100.times { return unless step }
+      raise 'Background poll loop did not finish'
     end
   end
   class HtmlDialog
     STYLE_UTILITY = 2
-    attr_reader :callbacks, :last_data, :path, :history
-    def initialize(_options)
-      @callbacks = {}
-      @history = []
-    end
-    def set_file(path); @path = path; end
+    attr_reader :last_data, :history, :callbacks
+    def initialize(_options); @callbacks, @history = {}, []; end
+    def set_file(path); raise 'Missing UI' unless File.file?(path); end
     def add_action_callback(name, &block); @callbacks[name] = block; end
     def set_on_closed(&block); @on_closed = block; end
     def show; @visible = true; end
@@ -71,266 +59,183 @@ module UI
     def close; @visible = false; @on_closed.call; end
     def event(name, *args); @callbacks.fetch(name).call(nil, *args); end
     def execute_script(script)
-      payload = script.sub('window.ModelSizeInfo.render(', '').sub(/\);\z/, '')
-      @last_data = JSON.parse(payload)
+      @last_data = JSON.parse(script.sub('window.ModelSizeInfo.render(', '').sub(/\);\z/, ''))
       @history << @last_data
     end
   end
 end
-
-class ObservableList < Array
+class TestSelection < Array
   def add(entity); self << entity; end
-  def observers; @observers ||= []; end
-  def add_observer(observer); observers << observer; end
-  def remove_observer(observer); observers.delete(observer); end
 end
-
-class TestEntities < ObservableList
-  attr_reader :iteration_count, :grep_calls, :yield_count
-  attr_accessor :forbid_iteration
-  def initialize(owner)
-    super()
-    @owner, @iteration_count, @yield_count = owner, 0, 0
-    @grep_calls = []
-  end
-  def <<(entity)
-    entity.parent = @owner
-    if entity.is_a?(Sketchup::Group) || entity.is_a?(Sketchup::ComponentInstance)
-      entity.definition.instances << entity unless entity.definition.instances.include?(entity)
-    end
-    super
-    observers.each { |observer| observer.onElementAdded(self, entity) }
-    self
-  end
-  def concat(entities)
-    entities.each { |entity| self << entity }
-    self
-  end
-  def each(&block)
-    raise 'Geometry collection must not be enumerated' if @forbid_iteration
-    @iteration_count += 1
-    super do |entity|
-      @yield_count += 1
-      block.call(entity)
-    end
-  end
-  def to_a
-    raise 'Geometry collection must not be copied' if @forbid_iteration
-    super
-  end
-  def grep(type)
-    @grep_calls << type
-    super
-  end
-end
-
-class TestDefinition
-  attr_accessor :name, :payload_bytes, :fail_save, :copies, :image, :erased
-  attr_reader :persistent_id, :entities, :exports, :last_path, :instances
-  def initialize(id, name, bytes)
-    @persistent_id, @name, @payload_bytes = id, name, bytes
-    @instances = []
-    @entities = TestEntities.new(self)
-    @entities.concat([Sketchup::Face.new, Sketchup::Face.new])
-    @exports, @copies = 0, 1
-  end
-  def count_used_instances; @copies; end
-  def valid?; !@erased; end
-  def image?; !!@image; end
-  def save_copy(path)
-    @exports += 1
-    @last_path = path
-    File.binwrite(path, 'x' * @payload_bytes)
-    return false if @fail_save
-    true
-  end
-end
-Sketchup.const_set(:ComponentDefinition, TestDefinition)
-
 class TestModel
-  attr_accessor :path, :title, :modified, :on_navigate
-  attr_reader :selection, :definitions, :entities, :materials, :last_path, :active_path, :active_view
-  def initialize
-    @path, @title, @modified = '', '', true
-    @selection, @definitions, @materials = 3.times.map { ObservableList.new }
-    @entities = TestEntities.new(self)
-    @observers = []
-    @active_view = TestView.new
-  end
-  def active_path=(path)
-    raise 'Cannot open a locked instance' if path.to_a.any?(&:locked?)
-    @active_path = path
-    @on_navigate.call if @on_navigate
+  attr_accessor :path, :modified, :active_path
+  attr_reader :observers, :selection, :by_id
+  def initialize(path = 'C:/models/中文 & sample.skp')
+    @path, @modified, @active_path = path, false, nil
+    @observers, @selection, @by_id = [], TestSelection.new, {}
   end
   def valid?; true; end
   def modified?; @modified; end
   def add_observer(observer); @observers << observer; end
   def remove_observer(observer); @observers.delete(observer); end
-  def observer_count; @observers.length; end
-  def save_copy(path)
-    @last_path = path
-    File.binwrite(path, 'm' * 2345)
-    true
+  def find_entity_by_persistent_id(id); @by_id[id]; end
+  %i[entities definitions save_copy active_view].each do |name|
+    define_method(name) { |*| raise "Live model #{name} must never be used by the panel" }
   end
 end
-
-class TestView
-  attr_reader :zoomed
-  def zoom(selection); @zoomed = selection.to_a; end
-end
-
 module ModelFootprintTools
   module SizeInfo
-    VERSION = '1.4.1'
+    VERSION = '1.5.0'
   end
 end
-require_relative '../src/model_size_info/analyzer'
-require_relative '../src/model_size_info/component_tree'
 require_relative '../src/model_size_info/panel'
-
-passed = []
-check = lambda do |name, &block|
-  raise "FAIL: #{name}" unless block.call
-  passed << name
-  puts "PASS: #{name}"
+def node(id, did, name = '中文 <组件>')
+  { 'id' => id.to_s, 'definition_id' => did.to_s, 'name' => name, 'definition_name' => '共享定义', 'kind' => '组件' }
 end
-
+ROOT_NODES = [node(10, 500, '父组件'), node(11, 500, '父组件副本'), node(12, 501, '植物')]
+CHILD_NODES = [node(20, 502, '子组件')]
+class FakeSession
+  attr_accessor :stall, :failure, :crash
+  attr_reader :requests, :closed, :source_bytes
+  def initialize
+    @requests = []
+    @source_bytes = 12345678
+  end
+  def start; self; end
+  def ready?; !!@ready; end
+  def pending?; !!@pending; end
+  def request(operation, id = '', offset = 0, force = false)
+    raise 'Duplicate request' if @pending
+    @pending = { operation: operation, definition_id: id, offset: offset, force: force }
+    @requests << @pending.dup
+  end
+  def poll
+    return nil if @stall
+    raise 'Worker exited' if @crash
+    unless @ready
+      @ready = true
+      return { 'ok' => true, 'ready' => true, 'source_bytes' => @source_bytes }
+    end
+    task, @pending = @pending, nil
+    return nil unless task
+    if @failure
+      value, @failure = @failure, nil
+      raise value
+    end
+    value = { 'ok' => true, 'operation' => task[:operation], 'definition_id' => task[:definition_id] }
+    if task[:operation] == 'list'
+      nodes = task[:definition_id] == '' ? ROOT_NODES : (task[:definition_id] == '500' ? CHILD_NODES : [])
+      value.merge!('offset' => task[:offset], 'nodes' => nodes, 'total' => nodes.length, 'next' => nodes.length)
+    else
+      value['bytes'] = task[:definition_id] == '500' ? 204800 : 4096
+    end
+    value
+  end
+  def close; @closed = true; end
+end
+class TestPanel < ModelFootprintTools::SizeInfo::Panel
+  attr_reader :sessions
+  def initialize; @sessions = []; super; end
+  def new_session
+    value = FakeSession.new.start
+    @sessions << value
+    value
+  end
+end
+$checks = 0
+def check(name)
+  raise 'FAIL: ' + name unless yield
+  $checks += 1
+  puts 'PASS: ' + name
+end
 model = TestModel.new
-analyzer = ModelFootprintTools::SizeInfo::Analyzer.new(model)
-check.call('unsaved model has no invented file size') { analyzer.snapshot[:bytes].nil? && analyzer.snapshot[:measurement_state] == 'unsaved' }
-small = TestDefinition.new(10, '小组件', 1024)
-large = TestDefinition.new(11, '<大组件 & 中文>', 65536)
-a = Sketchup::ComponentInstance.new(small, '实例名称')
-b = Sketchup::ComponentInstance.new(small)
-group = Sketchup::Group.new(large)
-small.copies = 8
-model.definitions.concat([small, large])
-model.selection << a
-data = analyzer.snapshot
-check.call('instance name and type are exposed') { data[:title] == '实例名称' && data[:subtitle] == '组件' }
-check.call('a new selection is pending until serialized') { data[:measurement_state] == 'pending' && data[:bytes].nil? }
-check.call('native instance count is not treated as file size') { data[:instance_count] == 8 && data[:direct_entities] == 2 }
-result = analyzer.measure_definition(small)
-check.call('size comes from actual temporary file bytes') { result[:bytes] == 1024 && analyzer.snapshot[:bytes] == 1024 }
-check.call('temporary component files are removed') { !File.exist?(small.last_path) && !Dir.exist?(File.dirname(small.last_path)) }
-analyzer.measure_definition(small)
-check.call('unchanged definitions are served from cache') { small.exports == 1 }
-analyzer.measure_definition(small, true)
-check.call('forced measurement bypasses cache') { small.exports == 2 }
-model.selection << b
-data = analyzer.snapshot
-check.call('identical definitions are counted once') { data[:bytes] == 1024 && data[:definition_count] == 1 && data[:rows][0][:selected_instances] == 2 }
-check.call('the measurement queue is also deduplicated') { analyzer.definitions_for(model.selection).length == 1 }
-model.selection << group
-analyzer.measure_definition(large)
-data = analyzer.snapshot
-check.call('multi-selection sums independent files once per definition') { data[:bytes] == 66560 && data[:definition_count] == 2 }
-check.call('results are sorted largest first') { data[:rows].map { |row| row[:bytes] } == [65536, 1024] }
-check.call('Chinese and HTML-like names remain data') { data[:rows][0][:name] == '<大组件 & 中文>' }
-model.selection << Sketchup::Face.new
-data = analyzer.snapshot
-check.call('mixed unsupported entities never produce a misleading total') { data[:bytes].nil? && data[:measurement_state] == 'partial' && data[:loose_count] == 1 }
-model.selection.replace([Sketchup::Face.new])
-check.call('raw geometry requires a group instead of an estimated size') { analyzer.snapshot[:measurement_state] == 'unsupported' && analyzer.snapshot[:rows].empty? }
-model.selection.replace([a])
-analyzer.invalidate
-check.call('editing invalidates all size caches') { analyzer.revision == 1 && analyzer.snapshot[:pending_count] == 1 }
-small.fail_save = true
-begin
-  analyzer.measure_definition(small)
-  raise 'failed saves must raise'
-rescue RuntimeError => error
-  check.call('save failure is reported and not cached') { error.message.include?('SKP') && analyzer.cached(small).nil? }
-  check.call('failed saves also clean up temporary files') { !File.exist?(small.last_path) }
-ensure
-  small.fail_save = false
-end
-Dir.mktmpdir('model-size-test-') do |directory|
-  original = File.join(directory, 'source.skp')
-  File.binwrite(original, 'saved-content')
-  model.path = original
-  model.title = '测试模型'
-  model.selection.clear
-  check.call('the saved model shows actual disk bytes') { analyzer.snapshot[:bytes] == 13 && analyzer.snapshot[:file][:modified] }
-  analyzer.measure_model
-  data = analyzer.snapshot
-  check.call('current model copy includes a new byte measurement') { data[:bytes] == 2345 && data[:file][:bytes] == 13 }
-  check.call('measuring a model preserves its source path and contents') { model.path == original && File.binread(original) == 'saved-content' }
-  check.call('temporary model files are removed') { !File.exist?(model.last_path) }
-  analyzer.invalidate
-  check.call('a later edit invalidates the model copy measurement') { analyzer.snapshot[:bytes] == 13 }
-end
-model.path = ''
-
 Sketchup.active_model = model
-model.selection.replace([a])
-panel = ModelFootprintTools::SizeInfo::Panel.new
+panel = TestPanel.new
 panel.show
 dialog = panel.instance_variable_get(:@dialog)
-check.call('panel HTML is packaged at its expected relative path') { File.file?(dialog.path) }
-dialog.event('scope', 'follow')
 dialog.event('ready')
-check.call('ready callback starts automatic measurement') { dialog.last_data['busy'] == true && UI.timer_count == 1 }
+check('opening only starts an isolated session and returns before loading') { panel.sessions.length == 1 && dialog.last_data['busy'] && panel.sessions.last.requests.empty? }
 UI.drain
-check.call('automatic measurement finishes with real byte data') { dialog.last_data['bytes'] == 1024 && dialog.last_data['busy'] == false }
-check.call('panel content passes through JSON data, not HTML injection') { dialog.last_data['title'] == '实例名称' }
-before = small.exports
-panel.selection_changed
+check('roots come from background data without touching live geometry or saving') { dialog.last_data['tree_root_count'] == 3 && dialog.last_data['tree_structure']['roots'].length == 3 && !dialog.last_data['busy'] }
+check('saved size is returned by the worker rather than a live model export') { dialog.last_data['file']['bytes'] == 12345678 }
+session = panel.sessions.last
+token = dialog.last_data['tree_token']
+dialog.event('measure_item', { 'token' => token, 'path' => '10', 'force' => false })
+check('row calculation is a background request') { session.requests.last[:operation] == 'measure' && dialog.last_data['tree_measuring_id'] == '500' }
 UI.drain
-check.call('reselecting unchanged objects reuses cached exports') { small.exports == before }
-panel.model_changed
+check('parent calculation measures one definition and no descendants') { session.requests.count { |r| r[:operation] == 'measure' } == 1 && session.requests.none? { |r| r[:definition_id] == '502' } }
+dialog.event('measure_item', { 'token' => token, 'path' => '11', 'force' => false })
+check('repeated instances share the cached result') { session.requests.count { |r| r[:operation] == 'measure' } == 1 }
+dialog.event('expand', { 'token' => token, 'path' => '10' })
 UI.drain
-check.call('model edits trigger a fresh automatic export') { small.exports == before + 1 }
-dialog.event('auto', false)
+check('expansion reads only the requested parent in the saved file') { session.requests.last[:operation] == 'list' && session.requests.last[:definition_id] == '500' }
+before = session.requests.length
+dialog.event('expand', { 'token' => token, 'path' => '11' })
+check('another instance reuses the same child directory') { session.requests.length == before }
+dialog.event('measure_item', { 'token' => token, 'path' => '10.20', 'force' => false })
 UI.drain
-panel.model_changed
-UI.drain
-check.call('disabling auto leaves a new measurement pending') { dialog.last_data['busy'] == false && dialog.last_data['bytes'].nil? }
-dialog.event('measure')
+check('a child can be calculated independently') { dialog.last_data['tree_measured'] == 2 && session.requests.last[:definition_id] == '502' }
+session.stall = true
+dialog.event('measure_item', { 'token' => token, 'path' => '10', 'force' => true })
+UI.step
 dialog.event('cancel')
+check('Stop terminates an in-flight worker and clears polling timers') { session.closed && UI.timers.empty? && !dialog.last_data['busy'] }
+check('cancel preserves other completed sizes') { dialog.last_data['tree_measured'] == 1 }
+dialog.event('measure_item', { 'token' => token, 'path' => '10', 'force' => false })
 UI.drain
-check.call('cancel removes queued exports and resets busy state') { dialog.last_data['busy'] == false && dialog.last_data['bytes'].nil? }
-dialog.event('measure')
+check('calculation restarts a worker against the same saved IDs') { panel.sessions.length == 2 && dialog.last_data['tree_measured'] == 2 }
+session = panel.sessions.last
+session.failure = 'Cannot write temporary file'
+dialog.event('measure_item', { 'token' => token, 'path' => '10', 'force' => true })
 UI.drain
-check.call('manual measurement works with auto disabled') { dialog.last_data['bytes'] == 1024 }
-dialog.event('scope', 'model')
+check('a failed recalculation clears only its own stale value') { dialog.last_data['tree_measured'] == 1 && dialog.last_data['tree_errors'] == 1 && !session.closed }
+dialog.event('measure_item', { 'token' => token, 'path' => '10', 'force' => false })
 UI.drain
-check.call('whole-model mode ignores a still-active selection') { dialog.last_data['kind'] == 'model' && dialog.last_data['bytes'].nil? }
-dialog.event('measure')
+check('retry updates the failed definition while keeping other results') { dialog.last_data['tree_measured'] == 2 && dialog.last_data['tree_errors'] == 0 }
+model.modified = true
+panel.model_changed
+check('unsaved edits keep the saved snapshot and do not start a new scan') { dialog.last_data['file']['modified'] && panel.sessions.length == 2 && dialog.last_data['tree_token'] == token }
+session.stall = true
+dialog.event('expand', { 'token' => token, 'path' => '12' })
+dialog.event('cancel')
+check('canceling directory work exposes an explicit resume state') { !dialog.last_data['tree_complete'] && session.closed }
+dialog.event('resume_scan')
 UI.drain
-check.call('whole-model button measures a temporary current copy') { dialog.last_data['bytes'] == 2345 && dialog.last_data['busy'] == false }
-dialog.event('scope', 'follow')
+check('resume restores the saved pending directory request') { dialog.last_data['tree_complete'] && panel.sessions.last.requests.last[:definition_id] == '501' }
+panel.saved
+check('saving cancels the old worker and invalidates snapshot results') { dialog.last_data['tree_measured'] == 0 && dialog.last_data['tree_token'] != token }
 UI.drain
-small.fail_save = true
-dialog.event('measure')
+check('the saved file refresh is deferred until after the save callback') { dialog.last_data['tree_root_count'] == 3 }
+dialog.event('measure_item', { 'token' => token, 'path' => '10' })
+check('stale tree actions are rejected without starting exports') { dialog.last_data['error'].include?('组件树已更新') }
+new_token = dialog.last_data['tree_token']
+entity = Sketchup::Group.new(500); entity.parent = model; model.by_id[10] = entity
+dialog.event('locate', { 'token' => new_token, 'path' => '10' })
+check('selecting a current object validates its saved ID and parent') { model.selection == [entity] && !dialog.last_data['error'] }
+entity.parent = Object.new
+dialog.event('locate', { 'token' => new_token, 'path' => '10' })
+check('moved or mismatched objects require a saved refresh') { dialog.last_data['error'].include?('当前对象') }
+session = panel.sessions.last
+session.crash = true
+dialog.event('measure_item', { 'token' => new_token, 'path' => '10', 'force' => true })
 UI.drain
-check.call('measurement errors are visible and never leave the panel busy') { !dialog.last_data['error'].nil? && dialog.last_data['busy'] == false }
-small.fail_save = false
-new_model = TestModel.new
-Sketchup.active_model = new_model
-panel.bind_model(new_model)
-UI.drain
-check.call('changing documents detaches old observers') { model.observer_count == 0 && model.selection.observers.empty? && model.materials.observers.empty? }
-check.call('a new document gets fresh stats and cache') { dialog.last_data['kind'] == 'model' && dialog.last_data['bytes'].nil? }
+check('a crashed worker returns an error and never falls back to live export') { !dialog.last_data['busy'] && dialog.last_data['error'].include?('Worker exited') && session.closed }
+unsaved = TestModel.new('')
+Sketchup.active_model = unsaved
+panel.bind_model(unsaved)
+check('an unsaved document waits for a normal save without opening a worker') { !dialog.last_data['file']['saved'] && dialog.last_data['empty_message'].include?('请先保存') && !dialog.last_data['busy'] }
+check('switching documents detaches the previous observer') { model.observers.empty? && unsaved.observers.length == 1 }
 dialog.close
-check.call('closing detaches all app and model observers') { new_model.observer_count == 0 && new_model.selection.observers.empty? && new_model.materials.observers.empty? && Sketchup.observer_count == 0 }
-check.call('closing clears all pending timers') { UI.timer_count == 0 }
-panel.show
-again = panel.instance_variable_get(:@dialog)
-again.event('ready')
-check.call('reopening creates fresh JavaScript callbacks') { !again.equal?(dialog) && again.callbacks.key?('measure') && again.last_data['kind'] == 'model' }
-again.event('auto', true)
+check('closing clears observers and timers') { unsaved.observers.empty? && Sketchup.observers.empty? && UI.timers.empty? }
+Sketchup.active_model = TestModel.new
+startup = TestPanel.new
+startup.show
+startup_dialog = startup.instance_variable_get(:@dialog)
+startup_dialog.event('ready')
+startup_dialog.event('cancel')
+check('canceling first load reports paused rather than active loading') { startup_dialog.last_data['tree_paused'] && startup_dialog.last_data['empty_message'].include?('读取已暂停') && !startup_dialog.last_data['busy'] }
+startup_dialog.event('resume_scan')
 UI.drain
-four = 4.times.map { |index| Sketchup::Group.new(TestDefinition.new(50 + index, "定义 #{index}", 500 + index)) }
-new_model.selection.replace(four)
-panel.selection_changed
-UI.drain
-check.call('large selections wait for explicit measurement') { again.last_data['pending_count'] == 4 && again.last_data['busy'] == false && four.all? { |entity| entity.definition.exports == 0 } }
-again.event('measure')
-new_model.selection.replace([four.last])
-panel.selection_changed
-UI.drain
-check.call('changing selection cancels obsolete queued measurements') { four[0].definition.exports == 0 && four.last.definition.exports == 1 && again.last_data['definition_count'] == 1 }
-again.close
-
-puts "#{passed.length} checks passed."
+check('a canceled first load can explicitly resume its root request') { startup_dialog.last_data['tree_root_count'] == 3 && !startup_dialog.last_data['tree_paused'] }
+startup_dialog.close
+puts "#{$checks} background panel checks passed."

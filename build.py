@@ -36,6 +36,7 @@ expected = {'model_size_info.rb', 'model_size_info/main.rb', 'model_size_info/an
             'model_size_info/ui/panel.css', 'model_size_info/ui/panel.js',
             'model_size_info/ui/tree.js', 'model_size_info/LICENSE.txt',
             'model_size_info/icons/model_size_info.svg', 'model_size_info/icons/model_size_info.pdf'}
+expected.add('model_size_info/worker/ModelSizeWorker.exe')
 with ZipFile(destination / (name + '.rbz')) as archive:
     assert archive.testzip() is None, 'RBZ archive failed CRC verification'
     assert set(archive.namelist()) == expected, 'RBZ structure does not match the expected extension layout'

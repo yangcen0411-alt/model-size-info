@@ -7,7 +7,7 @@ require File.join(__dir__, 'panel')
 
 module ModelFootprintTools
   module SizeInfo
-    VERSION = '1.4.1'.freeze unless const_defined?(:VERSION)
+    VERSION = '1.5.0'.freeze unless const_defined?(:VERSION)
 
     def self.show
       if Sketchup.version.to_i < 22
@@ -24,8 +24,8 @@ module ModelFootprintTools
       icon_path = File.join(__dir__, 'icons', "model_size_info.#{icon_extension}")
       command.small_icon = icon_path
       command.large_icon = icon_path
-      command.tooltip = '查看群组、组件与模型的 SKP 文件大小'
-      command.status_bar_text = '打开模型占用信息面板，按需计算群组和组件的 SKP 文件体积。'
+      command.tooltip = '后台查看已保存模型与组件的 SKP 文件大小'
+      command.status_bar_text = '打开模型占用信息面板，按需计算已保存文件中的群组和组件大小。'
       UI.menu('Extensions').add_item(command)
       UI.add_context_menu_handler { |menu| menu.add_item(command) }
       @toolbar = UI::Toolbar.new('模型占用信息')

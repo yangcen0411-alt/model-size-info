@@ -3,152 +3,55 @@
   var current = null;
   var $ = function (id) { return document.getElementById(id); };
   var numbers = new Intl.NumberFormat('zh-CN');
-
   function send(name, value) {
     if (window.sketchup && typeof window.sketchup[name] === 'function') {
       if (arguments.length > 1) window.sketchup[name](value);
       else window.sketchup[name]();
     }
   }
-
   function formatBytes(bytes) {
-    if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return { value: '—', unit: '' };
-    var units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    var index = 0;
-    var size = Math.max(0, bytes);
+    if (bytes == null || !Number.isFinite(bytes)) return { value: '—', unit: '' };
+    var units = ['B', 'KB', 'MB', 'GB', 'TB'], index = 0, size = Math.max(0, bytes);
     while (size >= 1024 && index < units.length - 1) { size /= 1024; index += 1; }
     return { value: index === 0 ? String(Math.round(size)) : size.toFixed(2), unit: units[index] };
   }
-
   function sizeText(bytes) {
     var parts = formatBytes(bytes);
     return parts.value + (parts.unit ? ' ' + parts.unit : '');
   }
-
-  function setText(id, value) { $(id).textContent = value; }
-  function setHidden(id, value) { $(id).hidden = value; }
-  function count(value) { return value === null || value === undefined ? '—' : numbers.format(value); }
   var tree = window.ModelSizeTree.create({ send: send, sizeText: sizeText });
-
-  function renderRows(rows) {
-    var list = $('definition-list');
-    while (list.firstChild) list.removeChild(list.firstChild);
-    rows.forEach(function (row) {
-      var item = document.createElement('div'); item.className = 'definition-item';
-      var info = document.createElement('div'); info.className = 'definition-text';
-      var name = document.createElement('div'); name.className = 'definition-name'; name.textContent = row.name; name.title = row.name;
-      var meta = document.createElement('div'); meta.className = 'definition-meta';
-      meta.textContent = row.kind + ' · 选中 ' + count(row.selected_instances) + ' 个实例';
-      var size = document.createElement('div'); size.className = 'definition-size' + (row.bytes === null ? ' pending' : '');
-      size.textContent = row.bytes === null ? '待测量' : sizeText(row.bytes);
-      info.appendChild(name); info.appendChild(meta); item.appendChild(info); item.appendChild(size); list.appendChild(item);
-    });
-  }
-
   function render(data) {
     current = data;
-    var model = data.kind === 'model';
-    var isTree = data.kind === 'tree';
-    var pausedScan = isTree && !data.busy && !data.tree_complete;
-    document.body.classList.toggle('tree-mode', isTree);
-    setHidden('primary', isTree); setHidden('properties', isTree); setHidden('tree-view', !isTree);
-    setHidden('primary-actions', isTree); setHidden('tree-options', !isTree); setHidden('scope-tree', isTree);
-    setHidden('auto-option', isTree || data.scope === 'model');
-    setHidden('load-all', !isTree || !!data.tree_all_loaded);
-    var parts = formatBytes(data.bytes);
-    setText('kind', data.subtitle);
-    setText('object-name', data.title); $('object-name').title = data.title;
-    setText('measurement-label', data.measurement_label);
-    setText('size-value', parts.value); setText('size-unit', parts.unit);
-    var detail = data.bytes === null ? '等待测量' : numbers.format(data.bytes) + ' 字节';
-    if (data.measured_at) detail += ' · 测量于 ' + data.measured_at;
-    if (data.measurement_state === 'unsaved') detail = '尚未保存，可直接测量当前模型副本。';
-    if (data.measurement_state === 'unsupported') detail = '请先选中群组或组件。';
-    if (data.measurement_state === 'partial') detail = '当前选择无法完整测量；下方仅列出可测量的定义。';
-    if (data.pending_count > 0 && !data.busy) {
-      detail = data.auto && data.definition_count <= data.auto_limit ? '稍候，正在准备测量…' : '点击下方按钮测量 ' + data.pending_count + ' 个定义。';
-      if (data.loose_count > 0) detail += ' 散图元未计入。';
-    }
-    if (data.busy) detail = data.pending_count > 0 ? '正在测量，剩余 ' + data.pending_count + ' 个定义…' : '正在保存临时副本…';
-    if (data.error) detail = '本次测量未完成，请查看下方提示。';
-    setText('size-detail', detail);
-    setText('selected-count', count(data.selected_count));
-    setText('definition-label', model ? '模型中的定义' : '不同定义');
-    setText('definition-count', count(data.definition_count));
-    setText('entities-label', model ? '顶层图元' : '内部图元（当前层）');
-    setText('direct-entities', count(data.direct_entities));
-    setText('instance-count', count(data.instance_count));
-    setHidden('selected-row', model); setHidden('entities-row', data.direct_entities === null); setHidden('instances-row', data.instance_count === null);
-    setHidden('breakdown', isTree || model || (data.rows.length < 2 && data.selected_count < 2));
-    renderRows(data.rows);
-    setText('note', data.note);
-    setText('error', data.error || ''); setHidden('error', !data.error);
-    setHidden('progress', !data.busy); setHidden('cancel', !data.busy);
-    setHidden('running-actions', !data.busy && !pausedScan);
-    setHidden('resume-scan', !pausedScan);
-    $('resume-scan').disabled = data.busy;
-    setText('measure', model ? '测量当前模型' : (data.bytes === null ? '测量选中定义' : '重新测量'));
-    $('measure').disabled = data.busy || (!model && !data.rows.length);
-    setText('measure-current', $('measure').textContent);
-    $('measure-current').disabled = $('measure').disabled;
-    if (isTree) {
-      tree.render(data);
-      setText('tree-root-count', count(data.tree_root_count));
-      setText('tree-definition-count', count(data.definition_count));
-      setText('tree-measured-count', count(data.tree_measured));
-      var scanning = data.job_kind === 'scan' || (!data.tree_complete && data.job_kind !== 'tree');
-      var treeDetail = scanning ? (data.busy ? '正在读取请求的层级，已发现 ' + count(data.definition_count) + ' 个定义…' : '读取已暂停，点击“继续读取”恢复。') :
-        (data.busy ? '正在测量 ' + count(data.tree_measured) + ' / ' + count(data.definition_count) + ' 个定义…' :
-          (data.tree_all_loaded ? '全部层级已读取。' : '当前层级已就绪，展开时读取子项。') +
-          (data.pending_count ? '点击行内“计算大小”查看体积。' : '父级包含子级，逐项查看。'));
-      if (data.tree_measuring_id && data.busy) treeDetail = '正在计算所点项目的完整 SKP 体积…';
-      var readProgress = data.tree_read_progress;
-      var scanLabel = '正在扫描';
-      if (scanning && readProgress && readProgress.total > 0) {
-        scanLabel = '当前层 ' + Math.min(100, Math.floor(readProgress.read / readProgress.total * 100)) + '%';
-        treeDetail += ' 已检查 ' + count(readProgress.read) + ' / ' + count(readProgress.total) + ' 个图元。';
-      }
-      if (!data.busy && data.tree_read_seconds != null) treeDetail += ' 最近读取 ' + data.tree_read_seconds.toFixed(2) + ' 秒。';
-      setText('tree-detail', treeDetail);
-      setText('tree-status', data.error ? (data.tree_errors ? '计算失败' : '查看提示') : (data.busy ? (scanning ? scanLabel : '正在计算') : (scanning ? '已暂停' : '层级已就绪')));
-      $('tree-status').className = 'status ' + (data.error ? 'error' : (data.busy ? 'busy' : (!scanning ? 'ready' : '')));
-      setHidden('tree-progress', !data.busy);
-      setText('measure', scanning ? '继续读取并批量计算' : (data.pending_count ? '批量计算已读取项' : '批量重新计算'));
-      $('measure').disabled = data.busy || (data.tree_complete && data.definition_count === 0);
-    }
-    $('load-all').disabled = data.busy;
-    $('refresh').disabled = data.busy;
-    $('auto').checked = data.auto;
-    setText('file-name', data.file.name); $('file-name').title = data.file.name;
-    setText('file-size', sizeText(data.file.bytes));
-    setText('file-state', !data.file.saved ? '尚未保存' : (data.file.modified ? '有未保存修改' : '已保存'));
-    $('scope-follow').classList.toggle('active', data.scope === 'follow');
-    $('scope-model').classList.toggle('active', data.scope === 'model');
-    $('scope-follow').setAttribute('aria-pressed', String(data.scope === 'follow'));
-    $('scope-model').setAttribute('aria-pressed', String(data.scope === 'model'));
-    $('scope-tree').classList.toggle('active', data.scope === 'tree');
-    $('scope-tree').setAttribute('aria-pressed', String(data.scope === 'tree'));
-    setText('version', 'v' + data.version);
-    var status = data.error ? '测量失败' : (data.busy ? '正在测量' : (data.bytes !== null ? '已更新' : '等待测量'));
-    setText('status', status);
-    $('status').className = 'status ' + (data.error ? 'error' : (data.busy ? 'busy' : (data.bytes !== null ? 'ready' : '')));
+    tree.render(data);
+    $('tree-empty').textContent = data.empty_message;
+    $('tree-progress').hidden = !data.busy;
+    var paused = !data.busy && !!data.tree_paused && !data.error;
+    var status = data.error ? '查看提示' : (data.busy ?
+      (data.job_kind === 'loading' ? '后台加载文件' : (data.job_kind === 'tree' ? '后台计算大小' : '后台读取目录')) : (paused ? '已暂停' : (data.tree_complete ? '就绪' : '等待读取')));
+    $('tree-status').textContent = status;
+    $('tree-status').className = 'status ' + (data.error ? 'error' : (data.busy ? 'busy' : 'ready'));
+    $('tree-root-count').textContent = numbers.format(data.tree_root_count);
+    $('tree-definition-count').textContent = numbers.format(data.definition_count);
+    $('tree-measured-count').textContent = numbers.format(data.tree_measured);
+    $('note').textContent = data.note;
+    $('version').textContent = 'v' + data.version;
+    $('error').textContent = data.error || '';
+    $('error').hidden = !data.error;
+    $('cancel').hidden = !data.busy;
+    $('resume-scan').hidden = !paused;
+    $('running-actions').hidden = !data.busy && !paused;
+    $('refresh').disabled = !!data.busy;
+    $('file-name').textContent = data.file.name; $('file-name').title = data.file.name;
+    $('file-size').textContent = sizeText(data.file.bytes);
+    $('file-state').textContent = !data.file.saved ? '尚未保存' : (data.file.modified ? '有未保存修改' : '已保存');
+    $('source-note').hidden = !data.file.saved || !data.file.modified;
   }
-
-  function closeMenu(restoreFocus) {
-    $('more').open = false;
-    if (restoreFocus) $('more-toggle').focus();
-  }
-
-  ['follow', 'model', 'tree'].forEach(function (scope) {
-    $('scope-' + scope).addEventListener('click', function () { closeMenu(true); send('scope', scope); });
-  });
-  $('auto').addEventListener('change', function () { send('auto', this.checked); });
-  $('measure').addEventListener('click', function () { closeMenu(true); send('measure'); });
-  $('measure-current').addEventListener('click', function () { send('measure'); });
-  $('cancel').addEventListener('click', function () { send('cancel'); });
-  $('resume-scan').addEventListener('click', function () { this.disabled = true; send('resume_scan'); });
+  function closeMenu(focus) { $('more').open = false; if (focus) $('more-toggle').focus(); }
   $('refresh').addEventListener('click', function () { send('refresh'); });
-  $('load-all').addEventListener('click', function () { closeMenu(true); send('load_all'); });
+  $('cancel').addEventListener('click', function () { send('cancel'); });
+  $('resume-scan').addEventListener('click', function () {
+    if (current && !current.busy) { $('resume-scan').hidden = true; send('resume_scan'); }
+  });
   $('tree-collapse').addEventListener('click', function () { closeMenu(true); });
   document.addEventListener('click', function (event) {
     if ($('more').open && !$('more').contains(event.target)) closeMenu(false);
@@ -156,18 +59,9 @@
   document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape' && $('more').open) { closeMenu(true); event.preventDefault(); }
   });
-
   window.ModelSizeInfo = { render: render, formatBytes: formatBytes, getState: function () { return current; } };
   document.addEventListener('DOMContentLoaded', function () {
     if (window.sketchup) send('ready');
-    else {
-      setText('status', '未连接 SketchUp');
-      setText('size-detail', '请从 SketchUp 的扩展菜单打开此面板。');
-      setText('tree-status', '未连接 SketchUp');
-      setText('tree-empty', '请从 SketchUp 的扩展菜单打开此面板。');
-      $('measure').disabled = true;
-      $('measure-current').disabled = true;
-      $('load-all').disabled = true;
-    }
+    else { $('tree-status').textContent = '未连接 SketchUp'; $('tree-empty').textContent = '请从 SketchUp 的扩展菜单打开此面板。'; }
   });
 }());
